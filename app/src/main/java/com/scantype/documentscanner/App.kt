@@ -287,7 +287,7 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
         else Intent(action).setDataAndType(u, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         runCatching { ctx.startActivity(i) }.onFailure { toast("No app found to open this file.") }
     }
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), onClick = { send(Intent.ACTION_VIEW) }) {
+    Card(onClick = { send(Intent.ACTION_VIEW) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp, 64.dp).clip(RoundedCornerShape(6.dp))) {
                 thumb?.let { Image(it.asImageBitmap(), null) } ?: Icon(Icons.Filled.PictureAsPdf, null)
