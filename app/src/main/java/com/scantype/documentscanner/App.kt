@@ -8,7 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -20,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,11 +45,16 @@ import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
+import com.google.mlkit.vision.common.InputImage
+import com.google.ai.client.generativeai.GenerativeModel
+import com.google.ai.client.generativeai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
-import androidx.compose.foundation.lazy.LazyRow
 import java.text.DateFormat
 import java.util.Date
 
@@ -67,54 +76,95 @@ fun App() {
     var pendingScan by remember { mutableStateOf<Uri?>(null) }
     var showTools by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
-    
-    // --- Permissions Logic ---
-    var hasCameraPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-        hasCameraPermission = isGranted
-        if (!isGranted) { scope.launch { snack.showSnackbar("Camera permission is needed to scan.") } }
+
+    // 1. Runtime Permissions Setup
+    var hasCameraPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        )
     }
-    
-    // Request permission on app start if needed
+    val permLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { perms ->
+        hasCameraPermission = perms[Manifest.permission.CAMERA] ?: hasCameraPermission
+    }
+
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+        val req = mutableListOf<String>()
+        if (!hasCameraPermission) req.add(Manifest.permission.CAMERA)
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                req.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                req.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
         }
+        if (req.isNotEmpty()) permLauncher.launch(req.toTypedArray())
     }
 
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list() }
 
-    // --- OCR Logic (ML Kit & Gemini Placeholder) ---
+    fun getBitmapFromUri(uri: Uri): Bitmap {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ctx.contentResolver, uri)) { decoder, _, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            MediaStore.Images.Media.getBitmap(ctx.contentResolver, uri)
+        }
+    }
+
+    // 2. OCR Logic (Hindi ML Kit + Gemini API fallback)
     fun runOcr(uris: List<Uri>, handwriting: Boolean) {
         scope.launch {
-            if (handwriting) {
-                // TODO: Gemini API Integration goes here. 
-                // For now, simulating the process.
-                busy = "Gemini AI is reading Hindi handwriting..."
-                withContext(Dispatchers.IO) { kotlinx.coroutines.delay(2000) } // Simulate network delay
-                editorIsHandwriting = true
-                editor = "यह Gemini API द्वारा पहचाना गया हिंदी टेक्स्ट होगा। इसे पूरी तरह लागू करने के लिए API Key की जरूरत है।"
-                busy = null
+            val out = StringBuilder()
+            var failed = 0
+            val apiKey = "YOUR_API_KEY" // Add your Google AI Studio key when ready
+
+            if (handwriting && apiKey != "YOUR_API_KEY" && apiKey.isNotBlank()) {
+                busy = "Gemini AI is reading handwriting..."
+                try {
+                    val generativeModel = GenerativeModel(
+                        modelName = "gemini-1.5-flash",
+                        apiKey = apiKey
+                    )
+                    uris.forEach { u ->
+                        val bmp = withContext(Dispatchers.IO) { getBitmapFromUri(u) }
+                        val inputContent = content {
+                            image(bmp)
+                            text("Extract all handwritten Hindi and English text accurately. Return only the extracted text without any preamble.")
+                        }
+                        val response = withContext(Dispatchers.IO) { generativeModel.generateContent(inputContent) }
+                        response.text?.let { out.append(it.trim()).append("\n\n") }
+                    }
+                } catch (e: Exception) {
+                    failed++
+                }
             } else {
-                // ML Kit for Printed Text
-                val engine = Engines.printed
-                val out = StringBuilder(); var failed = 0
-                uris.forEachIndexed { i, u ->
-                    busy = "Reading printed page ${i + 1} of ${uris.size}…"
-                    engine.recognize(ctx, u).onSuccess { out.append(it.trim()).append("\n\n") }.onFailure { failed++ }
+                busy = "Extracting text (Devanagari ML Kit)..."
+                val recognizer = TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
+                uris.forEach { u ->
+                    try {
+                        val image = InputImage.fromFilePath(ctx, u)
+                        val result = recognizer.process(image).await()
+                        out.append(result.text).append("\n\n")
+                    } catch (e: Exception) {
+                        failed++
+                    }
                 }
-                busy = null
-                if (out.isBlank()) toast("We couldn't recognize this page. Please try again with better lighting.")
-                else {
-                    editorIsHandwriting = false; editor = out.toString().trim()
-                    if (failed > 0) toast("Some pages could not be read.")
-                }
+            }
+
+            busy = null
+            if (out.isBlank()) toast("We couldn't recognize this page. Please try again with better lighting.")
+            else {
+                editorIsHandwriting = handwriting
+                editor = out.toString().trim()
+                if (failed > 0) toast("Some pages could not be read.")
             }
         }
     }
 
-    // --- Scanner Logic ---
     val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
         val res = if (r.resultCode == Activity.RESULT_OK) GmsDocumentScanningResult.fromActivityResultIntent(r.data) else null
         if (res != null) scope.launch {
@@ -130,18 +180,19 @@ fun App() {
 
     fun startScan(m: Mode) {
         if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+            permLauncher.launch(arrayOf(Manifest.permission.CAMERA))
             return
         }
         mode = m
-        // We are using Google's scanner here for now. Custom CameraX will be a separate component.
         val opts = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true).setPageLimit(30)
+            .setGalleryImportAllowed(true)
+            .setPageLimit(30)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG, GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build()
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
         GmsDocumentScanning.getClient(opts).getStartScanIntent(activity)
             .addOnSuccessListener { scanLauncher.launch(IntentSenderRequest.Builder(it).build()) }
-            .addOnFailureListener { toast("The scanner isn't available. Please update Google Play services and try again.") }
+            .addOnFailureListener { toast("Scanner isn't available. Please update Google Play services.") }
     }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
@@ -151,8 +202,9 @@ fun App() {
         if (us.isNotEmpty()) scope.launch {
             busy = "Creating PDF…"
             val ok = withContext(Dispatchers.IO) { runCatching { store.imagesToPdf(us) }.isSuccess }
-            busy = null; refresh()
-            if (ok) { tab = 1; toast("PDF created") } else toast("PDF creation failed. Please try again.")
+            busy = null
+            refresh()
+            if (ok) { tab = 1; toast("PDF created") } else toast("PDF creation failed.")
         }
     }
     val imageOnly = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
@@ -169,42 +221,78 @@ fun App() {
     }
 
     Scaffold(
+        modifier = Modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
-            // New UI: Bottom Bar with Floating Action Button style center button
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant
             ) {
-                NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Home") })
-                
-                // Center Scan Button (Floating Action Button Look)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    FloatingActionButton(
-                        onClick = { startScan(Mode.SCAN) },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                        shape = CircleShape,
-                        modifier = Modifier.size(56.dp).offset(y = (-8).dp)
-                    ) {
-                        Icon(Icons.Filled.PhotoCamera, "Scan")
+                NavigationBarItem(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
+                    label = { Text("Home") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = { startScan(Mode.SCAN) },
+                    icon = {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.PhotoCamera,
+                                    contentDescription = "Scan",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    },
+                    label = {
+                        Text(
+                            "Scan",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
-                }
-                
-                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Folder, null) }, label = { Text("Docs") })
-                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") })
+                )
+                NavigationBarItem(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    icon = { Icon(Icons.Filled.Folder, contentDescription = "Documents") },
+                    label = { Text("Docs") }
+                )
+                NavigationBarItem(
+                    selected = tab == 2,
+                    onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                    label = { Text("Settings") }
+                )
             }
         }
     ) { pad ->
-        Box(Modifier.padding(pad)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(pad)
+        ) {
             when (tab) {
-                0 -> HomeScreen(docs, store, ::refresh, ::toast, { tab = 1 },
-                    onScan = { startScan(Mode.SCAN) }, onHand = { startScan(Mode.HANDWRITING) },
-                    onImgText = { pickImage.launch(imageOnly) }, onImgPdf = { pickImages.launch(imageOnly) }, onTools = { showTools = true })
+                0 -> HomeScreen(
+                    docs = docs,
+                    store = store,
+                    refresh = ::refresh,
+                    toast = ::toast,
+                    seeAll = { tab = 1 },
+                    onScan = { startScan(Mode.SCAN) },
+                    onHand = { startScan(Mode.HANDWRITING) },
+                    onImgText = { pickImage.launch(imageOnly) },
+                    onImgPdf = { pickImages.launch(imageOnly) },
+                    onTools = { showTools = true }
+                )
                 1 -> DocumentsScreen(docs, store, ::refresh, ::toast)
                 else -> SettingsScreen()
             }
@@ -214,32 +302,50 @@ fun App() {
                         pendingScan = null
                         scope.launch {
                             withContext(Dispatchers.IO) { runCatching { store.importPdf(u, name) } }
-                            refresh(); tab = 1; toast("Saved to Documents")
+                            refresh()
+                            tab = 1
+                            toast("Saved to Documents")
                         }
                     },
-                    onCancel = { pendingScan = null })
+                    onCancel = { pendingScan = null }
+                )
             }
             busy?.let {
-                AlertDialog(onDismissRequest = {}, confirmButton = {}, text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(it)
+                AlertDialog(
+                    onDismissRequest = {},
+                    confirmButton = {},
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator(Modifier.size(28.dp))
+                            Spacer(Modifier.width(16.dp))
+                            Text(it)
+                        }
                     }
-                })
+                )
             }
         }
     }
 }
 
-// --- New Premium Home Screen UI ---
 @Composable
-fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit, seeAll: () -> Unit,
-               onScan: () -> Unit, onHand: () -> Unit, onImgText: () -> Unit, onImgPdf: () -> Unit, onTools: () -> Unit) {
+fun HomeScreen(
+    docs: List<File>,
+    store: DocStore,
+    refresh: () -> Unit,
+    toast: (String) -> Unit,
+    seeAll: () -> Unit,
+    onScan: () -> Unit,
+    onHand: () -> Unit,
+    onImgText: () -> Unit,
+    onImgPdf: () -> Unit,
+    onTools: () -> Unit
+) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 20.dp),
-        contentPadding = PaddingValues(vertical = 16.dp),
+        contentPadding = PaddingValues(top = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -313,8 +419,10 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
 
         item {
             OutlinedButton(
-                onClick = onTools, 
-                modifier = Modifier.fillMaxWidth().height(56.dp), 
+                onClick = onTools,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Icon(Icons.Default.Build, contentDescription = null)
@@ -325,7 +433,11 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         }
 
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Text(
                     text = "Recent Documents",
                     fontSize = 18.sp,
@@ -341,8 +453,12 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         if (docs.isEmpty()) {
             item {
                 Card(
-                    modifier = Modifier.fillMaxWidth().height(120.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
                     shape = RoundedCornerShape(16.dp)
                 ) {
                     Column(
@@ -350,7 +466,11 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Text("Your scanned documents will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                        Text(
+                            "Your scanned documents will appear here.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
                         Spacer(Modifier.height(8.dp))
                         Button(onClick = onScan) { Text("Scan Now") }
                     }
@@ -373,35 +493,51 @@ fun PremiumActionCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = modifier
-            .height(140.dp)
-            .clickable { onClick() },
+        onClick = onClick,
+        modifier = modifier.height(140.dp),
         shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp), // Increased shadow
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     ) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxSize(),
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Box(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
             }
             Column {
-                Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), lineHeight = 14.sp)
+                Text(
+                    text = title,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    lineHeight = 14.sp
+                )
             }
         }
     }
 }
-
-// ... (Rest of the file - DocumentsScreen, DocRow, EditorScreen, SettingsScreen remain unchanged from the previous code)
 
 @Composable
 fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit) {
@@ -422,9 +558,18 @@ fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toas
     }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(q, { q = it }, Modifier.weight(1f), leadingIcon = { Icon(Icons.Filled.Search, null) },
-                placeholder = { Text("Search name or text") }, singleLine = true, shape = RoundedCornerShape(16.dp))
-            IconButton({ importPdf.launch(arrayOf("application/pdf")) }) { Icon(Icons.Filled.Add, "Import PDF") }
+            OutlinedTextField(
+                value = q,
+                onValueChange = { q = it },
+                modifier = Modifier.weight(1f),
+                leadingIcon = { Icon(Icons.Filled.Search, null) },
+                placeholder = { Text("Search name or text") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
+            )
+            IconButton({ importPdf.launch(arrayOf("application/pdf")) }) {
+                Icon(Icons.Filled.Add, "Import PDF")
+            }
         }
         LazyRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item { FilterChip(folder == null, { folder = null }, { Text("All") }) }
@@ -438,10 +583,13 @@ fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toas
     }
     if (newFolder) {
         var name by remember { mutableStateOf("") }
-        AlertDialog({ newFolder = false }, title = { Text("New folder") },
+        AlertDialog(
+            onDismissRequest = { newFolder = false },
+            title = { Text("New folder") },
             text = { OutlinedTextField(name, { name = it }, singleLine = true) },
             confirmButton = { TextButton({ store.createFolder(name); newFolder = false; refresh() }) { Text("Create") } },
-            dismissButton = { TextButton({ newFolder = false }) { Text("Cancel") } })
+            dismissButton = { TextButton({ newFolder = false }) { Text("Cancel") } }
+        )
     }
 }
 
@@ -452,16 +600,33 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
-    val thumb by produceState<Bitmap?>(null, f.path, f.lastModified()) { value = withContext(Dispatchers.IO) { store.thumb(f) } }
-    val pages by produceState(0, f.path, f.lastModified()) { value = withContext(Dispatchers.IO) { store.pageCount(f) } }
+    val thumb by produceState<Bitmap?>(null, f.path, f.lastModified()) {
+        value = withContext(Dispatchers.IO) { store.thumb(f) }
+    }
+    val pages by produceState(0, f.path, f.lastModified()) {
+        value = withContext(Dispatchers.IO) { store.pageCount(f) }
+    }
+
     fun send(action: String) {
         val u = store.uri(f)
-        val i = if (action == Intent.ACTION_SEND) Intent.createChooser(
-            Intent(action).setType("application/pdf").putExtra(Intent.EXTRA_STREAM, u).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), null)
-        else Intent(action).setDataAndType(u, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val i = if (action == Intent.ACTION_SEND) {
+            Intent(action)
+                .setType("application/pdf")
+                .putExtra(Intent.EXTRA_STREAM, u)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } else {
+            Intent(action)
+                .setDataAndType(u, "application/pdf")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
         runCatching { ctx.startActivity(i) }.onFailure { toast("No app found to open this file.") }
     }
-    Card(onClick = { send(Intent.ACTION_VIEW) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+
+    Card(
+        onClick = { send(Intent.ACTION_VIEW) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp)
+    ) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp, 64.dp).clip(RoundedCornerShape(6.dp))) {
                 thumb?.let { Image(it.asImageBitmap(), null) } ?: Icon(Icons.Filled.PictureAsPdf, null)
@@ -469,8 +634,10 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(f.nameWithoutExtension, maxLines = 1, style = MaterialTheme.typography.titleSmall)
-                Text("${DateFormat.getDateInstance().format(Date(f.lastModified()))} · $pages pages · ${f.length() / 1024} KB",
-                    style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "${DateFormat.getDateInstance().format(Date(f.lastModified()))} · $pages pages · ${f.length() / 1024} KB",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             Box {
                 IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
@@ -487,47 +654,90 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
     }
     if (renaming) {
         var name by remember { mutableStateOf(f.nameWithoutExtension) }
-        AlertDialog({ renaming = false }, title = { Text("Rename") },
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            title = { Text("Rename") },
             text = { OutlinedTextField(name, { name = it }, singleLine = true) },
             confirmButton = { TextButton({ store.rename(f, name); renaming = false; refresh() }) { Text("Save") } },
-            dismissButton = { TextButton({ renaming = false }) { Text("Cancel") } })
+            dismissButton = { TextButton({ renaming = false }) { Text("Cancel") } }
+        )
     }
-    if (moving) AlertDialog({ moving = false }, title = { Text("Move to folder") },
-        text = {
-            Column {
-                (listOf("") + store.folders()).forEach { fl ->
-                    TextButton({ store.move(f, fl); moving = false; refresh() }) { Text(if (fl.isEmpty()) "No folder" else fl) }
+    if (moving) {
+        AlertDialog(
+            onDismissRequest = { moving = false },
+            title = { Text("Move to folder") },
+            text = {
+                Column {
+                    (listOf("") + store.folders()).forEach { fl ->
+                        TextButton({ store.move(f, fl); moving = false; refresh() }) {
+                            Text(if (fl.isEmpty()) "No folder" else fl)
+                        }
+                    }
                 }
-            }
-        },
-        confirmButton = {}, dismissButton = { TextButton({ moving = false }) { Text("Cancel") } })
-    if (deleting) AlertDialog({ deleting = false }, title = { Text("Delete this document?") },
-        text = { Text("This can't be undone.") },
-        confirmButton = { TextButton({ store.delete(f); deleting = false; refresh() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
-        dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } })
+            },
+            confirmButton = {},
+            dismissButton = { TextButton({ moving = false }) { Text("Cancel") } }
+        )
+    }
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            title = { Text("Delete this document?") },
+            text = { Text("This can't be undone.") },
+            confirmButton = { TextButton({ store.delete(f); deleting = false; refresh() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+            dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EditorScreen(initial: String, handwriting: Boolean, store: DocStore, close: () -> Unit, refresh: () -> Unit,
-                 snack: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope) {
+fun EditorScreen(
+    initial: String,
+    handwriting: Boolean,
+    store: DocStore,
+    close: () -> Unit,
+    refresh: () -> Unit,
+    snack: SnackbarHostState,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
     val ctx = LocalContext.current
     var text by remember { mutableStateOf(initial) }
     Scaffold(
-        topBar = { TopAppBar({ Text("Recognized Text") }, navigationIcon = { IconButton(close) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Recognized Text") },
+                navigationIcon = { IconButton(close) { Icon(Icons.Filled.ArrowBack, "Back") } }
+            )
+        },
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         Column(Modifier.padding(pad).padding(16.dp)) {
-            if (handwriting) Text("Handwriting recognition can make mistakes. Please review and correct the text.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
+            if (handwriting) {
+                Text(
+                    "Handwriting recognition can make mistakes. Please review and correct the text.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp)
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton({
-                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("text", text))
+                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                        .setPrimaryClip(ClipData.newPlainText("text", text))
                     scope.launch { snack.showSnackbar("Copied") }
                 }) { Text("Copy") }
                 OutlinedButton({
-                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
+                    ctx.startActivity(
+                        Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text),
+                            null
+                        )
+                    )
                 }) { Text("Share") }
                 Button({
                     scope.launch {
