@@ -14,6 +14,8 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -172,59 +175,173 @@ fun App() {
 @Composable
 fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit, seeAll: () -> Unit,
                onScan: () -> Unit, onHand: () -> Unit, onImgText: () -> Unit, onImgPdf: () -> Unit, onTools: () -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 20.dp),
+        contentPadding = PaddingValues(vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Top Header Section
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)))
-                Spacer(Modifier.width(12.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.scantype_logo),
+                    contentDescription = "ScanType logo",
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                )
+                Spacer(modifier = Modifier.width(16.dp))
                 Column {
-                    Text("ScanType", fontSize = 24.sp, style = MaterialTheme.typography.headlineSmall)
-                    Text("Scan. Convert. Edit. PDF.", color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        text = "ScanType",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Scan. Convert. Edit. PDF.",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
+            Spacer(modifier = Modifier.height(8.dp))
         }
+
+        // 4 Main Action Cards
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionCard(Icons.Filled.DocumentScanner, "Scan Document", "Scan paper into PDF · Offline", onScan, Modifier.weight(1f))
-                    ActionCard(Icons.Filled.Edit, "Handwriting to Text", "Convert handwriting into editable text", onHand, Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionCard(Icons.Filled.Image, "Image to Text", "Extract printed Hindi/English text · Offline", onImgText, Modifier.weight(1f))
-                    ActionCard(Icons.Filled.PictureAsPdf, "Image to PDF", "Create PDF from images · Offline", onImgPdf, Modifier.weight(1f))
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PremiumActionCard(
+                    icon = Icons.Default.DocumentScanner,
+                    title = "Scan Document",
+                    subtitle = "Paper to PDF",
+                    onClick = onScan,
+                    modifier = Modifier.weight(1f)
+                )
+                PremiumActionCard(
+                    icon = Icons.Default.Edit,
+                    title = "Handwriting",
+                    subtitle = "Hindi/Eng to Text",
+                    onClick = onHand,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+
         item {
-            OutlinedButton(onTools, Modifier.fillMaxWidth()) {
-                Icon(Icons.Filled.Build, null); Spacer(Modifier.width(8.dp)); Text("PDF Tools: merge, split, compress")
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                PremiumActionCard(
+                    icon = Icons.Default.Image,
+                    title = "Image to Text",
+                    subtitle = "Extract Text",
+                    onClick = onImgText,
+                    modifier = Modifier.weight(1f)
+                )
+                PremiumActionCard(
+                    icon = Icons.Default.PictureAsPdf,
+                    title = "Image to PDF",
+                    subtitle = "Make PDF Files",
+                    onClick = onImgPdf,
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
+
+        // PDF Tools Button
+        item {
+            OutlinedButton(
+                onClick = onTools, 
+                modifier = Modifier.fillMaxWidth().height(56.dp), 
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Default.Build, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("PDF Tools: Merge, Split, Compress", fontSize = 15.sp)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Recent Documents Section
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent Documents", style = MaterialTheme.typography.titleMedium)
-                if (docs.isNotEmpty()) TextButton(seeAll) { Text("See all") }
+                Text(
+                    text = "Recent Documents",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                if (docs.isNotEmpty()) {
+                    TextButton(onClick = seeAll) { Text("See all") }
+                }
             }
         }
-        if (docs.isEmpty()) item {
-            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Your scanned documents will appear here.")
-                Spacer(Modifier.height(12.dp))
-                Button(onScan) { Text("Scan Your First Document") }
+
+        if (docs.isEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text("Your scanned documents will appear here.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = onScan) { Text("Scan Now") }
+                    }
+                }
             }
-        } else items(docs.take(4), key = { it.path }) { DocRow(it, store, refresh, toast) }
+        } else {
+            items(docs.take(4), key = { it.path }) {
+                DocRow(it, store, refresh, toast)
+            }
+        }
     }
 }
 
 @Composable
-fun ActionCard(icon: ImageVector, title: String, sub: String, onClick: () -> Unit, modifier: Modifier) {
-    Card(onClick, modifier.heightIn(min = 140.dp), shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(16.dp)) {
-            Icon(icon, null, Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(10.dp))
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(sub, style = MaterialTheme.typography.bodySmall)
+fun PremiumActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .height(140.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+            }
+            Column {
+                Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), lineHeight = 14.sp)
+            }
         }
     }
 }
