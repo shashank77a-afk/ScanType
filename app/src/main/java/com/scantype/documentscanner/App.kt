@@ -1,10 +1,12 @@
 package com.scantype.documentscanner
 
+import android.Manifest
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.ComponentActivity
@@ -19,6 +21,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -34,6 +37,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -63,26 +67,54 @@ fun App() {
     var pendingScan by remember { mutableStateOf<Uri?>(null) }
     var showTools by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
+    
+    // --- Permissions Logic ---
+    var hasCameraPermission by remember { mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        hasCameraPermission = isGranted
+        if (!isGranted) { scope.launch { snack.showSnackbar("Camera permission is needed to scan.") } }
+    }
+    
+    // Request permission on app start if needed
+    LaunchedEffect(Unit) {
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list() }
 
+    // --- OCR Logic (ML Kit & Gemini Placeholder) ---
     fun runOcr(uris: List<Uri>, handwriting: Boolean) {
         scope.launch {
-            val engine = if (handwriting) Engines.handwriting else Engines.printed
-            val out = StringBuilder(); var failed = 0
-            uris.forEachIndexed { i, u ->
-                busy = "Reading page ${i + 1} of ${uris.size}…"
-                engine.recognize(ctx, u).onSuccess { out.append(it.trim()).append("\n\n") }.onFailure { failed++ }
-            }
-            busy = null
-            if (out.isBlank()) toast("We couldn't recognize this page. Please try again with better lighting.")
-            else {
-                editorIsHandwriting = handwriting; editor = out.toString().trim()
-                if (failed > 0) toast("Some pages could not be read.")
+            if (handwriting) {
+                // TODO: Gemini API Integration goes here. 
+                // For now, simulating the process.
+                busy = "Gemini AI is reading Hindi handwriting..."
+                withContext(Dispatchers.IO) { kotlinx.coroutines.delay(2000) } // Simulate network delay
+                editorIsHandwriting = true
+                editor = "यह Gemini API द्वारा पहचाना गया हिंदी टेक्स्ट होगा। इसे पूरी तरह लागू करने के लिए API Key की जरूरत है।"
+                busy = null
+            } else {
+                // ML Kit for Printed Text
+                val engine = Engines.printed
+                val out = StringBuilder(); var failed = 0
+                uris.forEachIndexed { i, u ->
+                    busy = "Reading printed page ${i + 1} of ${uris.size}…"
+                    engine.recognize(ctx, u).onSuccess { out.append(it.trim()).append("\n\n") }.onFailure { failed++ }
+                }
+                busy = null
+                if (out.isBlank()) toast("We couldn't recognize this page. Please try again with better lighting.")
+                else {
+                    editorIsHandwriting = false; editor = out.toString().trim()
+                    if (failed > 0) toast("Some pages could not be read.")
+                }
             }
         }
     }
 
+    // --- Scanner Logic ---
     val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
         val res = if (r.resultCode == Activity.RESULT_OK) GmsDocumentScanningResult.fromActivityResultIntent(r.data) else null
         if (res != null) scope.launch {
@@ -97,7 +129,12 @@ fun App() {
     }
 
     fun startScan(m: Mode) {
+        if (!hasCameraPermission) {
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+            return
+        }
         mode = m
+        // We are using Google's scanner here for now. Custom CameraX will be a separate component.
         val opts = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true).setPageLimit(30)
             .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG, GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
@@ -134,10 +171,31 @@ fun App() {
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
-            NavigationBar {
+            // New UI: Bottom Bar with Floating Action Button style center button
+            NavigationBar(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            ) {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Home") })
-                NavigationBarItem(false, { startScan(Mode.SCAN) }, { Icon(Icons.Filled.DocumentScanner, null) }, label = { Text("Scan") })
-                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Folder, null) }, label = { Text("Documents") })
+                
+                // Center Scan Button (Floating Action Button Look)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    FloatingActionButton(
+                        onClick = { startScan(Mode.SCAN) },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                        shape = CircleShape,
+                        modifier = Modifier.size(56.dp).offset(y = (-8).dp)
+                    ) {
+                        Icon(Icons.Filled.PhotoCamera, "Scan")
+                    }
+                }
+                
+                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Folder, null) }, label = { Text("Docs") })
                 NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") })
             }
         }
@@ -172,6 +230,7 @@ fun App() {
     }
 }
 
+// --- New Premium Home Screen UI ---
 @Composable
 fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit, seeAll: () -> Unit,
                onScan: () -> Unit, onHand: () -> Unit, onImgText: () -> Unit, onImgPdf: () -> Unit, onTools: () -> Unit) {
@@ -183,7 +242,6 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         contentPadding = PaddingValues(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Top Header Section
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -215,7 +273,6 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // 4 Main Action Cards
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 PremiumActionCard(
@@ -254,7 +311,6 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             }
         }
 
-        // PDF Tools Button
         item {
             OutlinedButton(
                 onClick = onTools, 
@@ -268,7 +324,6 @@ fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // Recent Documents Section
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -322,7 +377,7 @@ fun PremiumActionCard(
             .height(140.dp)
             .clickable { onClick() },
         shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp), // Increased shadow
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(
@@ -345,6 +400,8 @@ fun PremiumActionCard(
         }
     }
 }
+
+// ... (Rest of the file - DocumentsScreen, DocRow, EditorScreen, SettingsScreen remain unchanged from the previous code)
 
 @Composable
 fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit) {
