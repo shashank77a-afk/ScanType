@@ -129,3 +129,12 @@ fun PdfToolsScreen(docs: List<File>, store: DocStore, close: () -> Unit, refresh
         }
     }
 }
+
+@Composable
+fun BusyDialog(text: String) {
+    AlertDialog(onDismissRequest = {}, confirmButton = {}, text = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(text)
+        }
+    })
+}

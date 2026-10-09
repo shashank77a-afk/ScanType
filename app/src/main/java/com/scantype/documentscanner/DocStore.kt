@@ -113,6 +113,22 @@ class DocStore(private val ctx: Context) {
         return newFile("ImagePDF").also { f -> f.outputStream().use { doc.writeTo(it) }; doc.close() }
     }
 
+    /** Builds a PDF from bitmaps supplied one at a time (each is recycled after use). */
+    fun bitmapsToPdf(n: Int, name: String, get: (Int) -> Bitmap) {
+        val doc = PdfDocument()
+        try {
+            for (i in 0 until n) {
+                val bmp = get(i)
+                val ph = (595f * bmp.height / bmp.width).toInt()
+                val p = doc.startPage(PdfDocument.PageInfo.Builder(595, ph, i + 1).create())
+                p.canvas.drawColor(Color.WHITE)
+                p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
+                doc.finishPage(p); bmp.recycle()
+            }
+            unique(name).outputStream().use { doc.writeTo(it) }
+        } finally { doc.close() }
+    }
+
     /** Typed PDF. Uses the system Devanagari font, so Hindi/English/mixed text renders correctly. */
     fun textToPdf(text: String): File {
         val m = 48; val cw = 595 - 2 * m; val ch = 842 - 2 * m
