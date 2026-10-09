@@ -12,7 +12,7 @@ android {
     defaultConfig {
         applicationId = "com.scantype.documentscanner"
         minSdk = 24; targetSdk = 35
-        versionCode = 2; versionName = "1.1.0"
+        versionCode = 3; versionName = "1.2.0"
     }
     signingConfigs {
         if (ksFile.exists()) create("release") {
@@ -42,6 +42,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
+    implementation("androidx.camera:camera-core:1.3.4")
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0-beta1")
     implementation("com.google.mlkit:text-recognition-devanagari:16.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")

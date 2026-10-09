@@ -3,6 +3,7 @@ package com.scantype.documentscanner
 import android.content.Context
 import android.graphics.*
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import kotlin.math.max
 import kotlin.math.min
 
@@ -16,9 +17,23 @@ object ImageFilters {
         ctx.contentResolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, o) }
         var s = 1
         while (max(o.outWidth, o.outHeight) / (s * 2) >= maxSide) s *= 2
-        val bmp = ctx.contentResolver.openInputStream(uri)!!.use {
+        var bmp = ctx.contentResolver.openInputStream(uri)!!.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = s })
         }!!
+        val deg = runCatching {
+            ctx.contentResolver.openInputStream(uri)!!.use {
+                when (ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1)) {
+                    ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+                    ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+                    ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+                    else -> 0f
+                }
+            }
+        }.getOrDefault(0f)
+        if (deg != 0f) {
+            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(deg) }, true)
+            bmp.recycle(); bmp = rotated
+        }
         val sc = maxSide.toFloat() / max(bmp.width, bmp.height)
         if (sc >= 1f) return bmp
         val scaled = Bitmap.createScaledBitmap(bmp, (bmp.width * sc).toInt(), (bmp.height * sc).toInt(), true)

@@ -67,6 +67,8 @@ fun App() {
     var mode by remember { mutableStateOf(Mode.SCAN) }
     val prefs = remember { Prefs(ctx) }
     var batch by remember { mutableStateOf(true) }
+    var showCamera by remember { mutableStateOf(false) }
+    var aiHint by remember { mutableStateOf(false) }
     var reviewPages by remember { mutableStateOf<List<Uri>?>(null) }
     var showTools by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
@@ -138,6 +140,12 @@ fun App() {
         return
     }
 
+    if (showCamera) {
+        BackHandler { showCamera = false }
+        CameraScreen(batch, { batch = it }, { uris -> showCamera = false; reviewPages = uris },
+            { showCamera = false }, { showCamera = false; startScan(Mode.SCAN) })
+        return
+    }
     val rp = reviewPages
     if (rp != null) {
         BackHandler { reviewPages = null }
@@ -149,7 +157,7 @@ fun App() {
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         floatingActionButton = {
-            if (tab != 2) ExtendedFloatingActionButton(onClick = { startScan(Mode.SCAN) },
+            if (tab != 2) ExtendedFloatingActionButton(onClick = { showCamera = true },
                 icon = { Icon(Icons.Filled.DocumentScanner, null) }, text = { Text("Scan") },
                 containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
         },
@@ -164,11 +172,15 @@ fun App() {
         Box(Modifier.padding(pad)) {
             when (tab) {
                 0 -> HomeScreen(docs, store, ::refresh, ::toast, { tab = 1 },
-                    onScan = { startScan(Mode.SCAN) }, onHand = { startScan(Mode.HANDWRITING) },
+                    onScan = { showCamera = true }, onHand = { if (prefs.aiReady) startScan(Mode.HANDWRITING) else aiHint = true },
                     onImgText = { pickImage.launch(imageOnly) }, onImgPdf = { pickImages.launch(imageOnly) }, onTools = { showTools = true }, batch = batch, onBatch = { batch = it })
                 1 -> DocumentsScreen(docs, store, ::refresh, ::toast)
                 else -> SettingsScreen(prefs)
             }
+            if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
+                text = { Text("Offline recognition is weak on handwriting. Turn on AI recognition in Settings (needs a free Gemini API key) for much better results.") },
+                confirmButton = { TextButton({ aiHint = false; tab = 2 }) { Text("Open Settings") } },
+                dismissButton = { TextButton({ aiHint = false; startScan(Mode.HANDWRITING) }) { Text("Continue offline") } })
             busy?.let {
                 AlertDialog(onDismissRequest = {}, confirmButton = {}, text = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
