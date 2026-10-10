@@ -51,6 +51,25 @@ class ReviewState(initial: List<Uri>) {
         u.forEach { pages.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0) }
     }
     fun remove(i: Int) { pages.removeAt(i); filters.removeAt(i); rots.removeAt(i) }
+    /** Moves page [a] to position [b] (keeps its filter and rotation). */
+    fun move(a: Int, b: Int) {
+        if (a !in pages.indices || b !in pages.indices || a == b) return
+        pages.add(b, pages.removeAt(a)); filters.add(b, filters.removeAt(a)); rots.add(b, rots.removeAt(a))
+    }
+}
+
+@Composable
+private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, n: Int, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    val bmp by produceState<Bitmap?>(null, uri, rot) {
+        value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
+    }
+    Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF164532))
+        .then(if (selected) Modifier.border(2.dp, Cyan, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
+        bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        Text("$n", color = Color.White, fontSize = 11.sp,
+            modifier = Modifier.align(Alignment.BottomEnd).background(Color(0x99000000)).padding(horizontal = 4.dp))
+    }
 }
 
 @Composable
@@ -161,6 +180,17 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
                 Text("Apply to all pages", color = Color.White, fontSize = 13.sp)
                 Spacer(Modifier.width(6.dp))
                 Switch(applyAll, { applyAll = it })
+            }
+            if (r.pages.size > 1) {
+                LazyRow(Modifier.padding(top = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(r.pages.indices.toList()) { i -> PageThumb(r.pages[i], r.rots[i], i == cur, i + 1) { idx = i } }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    val tc = ButtonDefaults.textButtonColors(contentColor = Cyan, disabledContentColor = Color(0x66FFFFFF))
+                    TextButton({ r.move(cur, cur - 1); idx = cur - 1 }, enabled = cur > 0, colors = tc) { Text("◀ Move earlier") }
+                    TextButton({ r.move(cur, cur + 1); idx = cur + 1 }, enabled = cur < r.pages.size - 1, colors = tc) { Text("Move later ▶") }
+                }
             }
             LazyRow(Modifier.padding(vertical = 8.dp), contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {

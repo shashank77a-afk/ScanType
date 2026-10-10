@@ -165,7 +165,9 @@ fun App() {
             CamMode.DOCS -> { val rv = review; if (rv != null) rv.add(uris) else review = ReviewState(uris) }
             CamMode.TEXT -> runOcr(uris, false)
             CamMode.HAND -> runOcr(uris, true)
-            CamMode.ID -> { idQueue = uris; idDone = emptyList() }
+            CamMode.ID ->
+                if (idQueue.isNotEmpty()) idQueue = idQueue + uris.take(1)          // back side added to the same card
+                else { idQueue = uris.take(2); idDone = emptyList() }              // front side (gallery may give both)
         }
     }
 
@@ -234,26 +236,35 @@ fun App() {
         CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs.aiReady,
             { uris, m -> onCaptured(uris, m) },
             { camMode = null; if (review?.pages?.isEmpty() == true) review = null },
-            { camMode = null; startScan(Mode.SCAN) })
+            { camMode = null; startScan(Mode.SCAN) },
+            idBack = idQueue.isNotEmpty())
         return
     }
     if (idQueue.isNotEmpty()) {
         val k = idDone.size
-        BackHandler { idQueue = emptyList(); idDone = emptyList() }
-        CropScreen(idQueue[k], 0, if (k == 0) "Crop the FRONT side" else "Crop the BACK side",
-            onDone = { u ->
-                val d = idDone + u
-                if (d.size >= idQueue.size) {
-                    idQueue = emptyList(); idDone = emptyList()
+        fun idReset() { idQueue = emptyList(); idDone = emptyList() }
+        BackHandler { idReset() }
+        if (k < idQueue.size) {
+            CropScreen(idQueue[k], 0, if (k == 0) "Crop the FRONT side" else "Crop the BACK side",
+                onDone = { u -> idDone = idDone + u }, onCancel = { idReset() })
+        } else {
+            // Every captured side is cropped: show both and let the user scan the back or finish.
+            IdSidesScreen(idDone,
+                onScanBack = { camMode = CamMode.ID },
+                onPdf = { val d = idDone; idReset(); review = ReviewState(d) },
+                onPrint = {
+                    val d = idDone
                     scope.launch {
-                        busy = "Preparing ID card page…"
+                        busy = "Preparing A4 print page…"
                         val res = withContext(Dispatchers.IO) { runCatching { IdCard.combine(ctx, d) }.getOrNull() }
                         busy = null
-                        if (res != null) review = ReviewState(listOf(res)) else toast("Could not prepare the ID card page. Please try again.")
+                        if (res != null) { idReset(); review = ReviewState(listOf(res)) }
+                        else toast("Could not prepare the ID card page. Please try again.")
                     }
-                } else idDone = d
-            },
-            onCancel = { idQueue = emptyList(); idDone = emptyList() })
+                },
+                onCancel = { idReset() })
+            busy?.let { BusyDialog(it) }
+        }
         return
     }
     val rv = review
@@ -648,4 +659,37 @@ fun SettingsScreen(prefs: Prefs) {
         text = { Text("With AI recognition ON, the pages you choose for Image to Text or Handwriting to Text are sent over the internet to Google's Gemini service, using your API key. Nothing is sent when it is OFF. Depending on your key type, Google's terms decide how the data is used, so avoid sensitive documents on a free key.") },
         confirmButton = { TextButton({ useAi = true; prefs.useAi = true; prefs.consented = true; confirm = false }) { Text("I agree") } },
         dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
+}
+
+/** Shows the cropped ID sides. With only the front done, offers "Scan Back Side"; "Finish" works with one or two sides. */
+@Composable
+fun IdSidesScreen(sides: List<Uri>, onScanBack: () -> Unit, onPdf: () -> Unit, onPrint: () -> Unit, onCancel: () -> Unit) {
+    val ctx = LocalContext.current
+    Scaffold { pad ->
+        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Back") }
+                Text("ID card", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            sides.forEachIndexed { i, u ->
+                val bmp by produceState<Bitmap?>(null, u) {
+                    value = withContext(Dispatchers.Default) { runCatching { ImageFilters.load(ctx, u, 700) }.getOrNull() }
+                }
+                Text(if (i == 0) "Front side" else "Back side", style = MaterialTheme.typography.titleSmall)
+                Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center) {
+                    val b = bmp
+                    if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    else CircularProgressIndicator()
+                }
+            }
+            if (sides.size == 1) {
+                Button(onScanBack, Modifier.fillMaxWidth()) { Text("Scan Back Side") }
+                OutlinedButton(onPdf, Modifier.fillMaxWidth()) { Text("Finish (front only)") }
+            } else Button(onPdf, Modifier.fillMaxWidth()) { Text("Finish (PDF, edit, save as images)") }
+            OutlinedButton(onPrint, Modifier.fillMaxWidth()) { Text("A4 print layout (front + back on one page)") }
+            Text("After Finish you can crop, rotate and adjust each side, save one PDF, or save the sides as separate images.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }

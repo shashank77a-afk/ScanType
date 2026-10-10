@@ -56,7 +56,7 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 /** ScanType's own camera. Asks for the CAMERA permission itself and explains what to do if it is denied. */
 @Composable
 fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, aiReady: Boolean,
-                 onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
+                 onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit, idBack: Boolean = false) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     fun has() = ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -72,7 +72,7 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
-    if (granted) CameraContent(mode, onMode, batch, onBatch, aiReady, onDone, onClose, onSmart)
+    if (granted) CameraContent(mode, onMode, batch, onBatch, aiReady, onDone, onClose, onSmart, idBack)
     else Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
         Text(if (denied) "Camera permission was denied. Allow it to scan with the camera, or choose images from your gallery."
         else "ScanType needs the camera only to photograph your documents. Photos stay on your device.")
@@ -89,7 +89,7 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
 
 @Composable
 private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, aiReady: Boolean,
-                          onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
+                          onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit, idBack: Boolean) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     val shots = remember { mutableStateListOf<Uri>() }
@@ -111,7 +111,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     busy = false
                     val u = Uri.fromFile(f)
-                    if (mode == CamMode.ID) { shots.add(u); if (shots.size >= 2) onDone(shots.toList(), mode) }
+                    if (mode == CamMode.ID) onDone(listOf(u), mode)
                     else if (batch) shots.add(u) else onDone(listOf(u), mode)
                 }
                 override fun onError(e: ImageCaptureException) {
@@ -148,13 +148,13 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000))
             .navigationBarsPadding().padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (mode == CamMode.ID) Text(if (shots.isEmpty()) "ID Card: capture the FRONT side" else "Now capture the BACK side",
+            if (mode == CamMode.ID) Text(if (!idBack) "ID Card: capture the FRONT side" else "Now capture the BACK side",
                 color = Color.White, fontSize = 15.sp)
             else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Single", !batch) { onBatch(false) }
                 Pill("Batch", batch) { onBatch(true) }
             }
-            Row {
+            if (!idBack) Row {
                 CamMode.values().forEach { m ->
                     Text(m.label, color = if (m == mode) Cyan else Color.White,
                         fontWeight = if (m == mode) FontWeight.Bold else FontWeight.Normal,
