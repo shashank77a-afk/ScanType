@@ -52,9 +52,9 @@ enum class Tool(val title: String, val hint: String) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PdfToolsScreen(docs: List<File>, store: DocStore, close: () -> Unit, refresh: () -> Unit,
+fun PdfToolsScreen(initial: Tool, docs: List<File>, store: DocStore, close: () -> Unit, refresh: () -> Unit,
                    snack: SnackbarHostState, scope: CoroutineScope) {
-    var tool by remember { mutableStateOf(Tool.MERGE) }
+    var tool by remember { mutableStateOf(initial) }
     var picked by remember { mutableStateOf(listOf<File>()) }
     var range by remember { mutableStateOf("") }
     var level by remember { mutableIntStateOf(1) }

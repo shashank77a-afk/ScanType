@@ -15,28 +15,31 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -46,11 +49,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import androidx.compose.foundation.lazy.LazyRow
 import java.text.DateFormat
 import java.util.Date
 
 enum class Mode { SCAN, HANDWRITING }
+
+class ToolItem(val icon: ImageVector, val label: String, val tint: Color, val onClick: () -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,21 +63,26 @@ fun App() {
     val activity = ctx as ComponentActivity
     val scope = rememberCoroutineScope()
     val store = remember { DocStore(ctx) }
+    val prefs = remember { Prefs(ctx) }
     var tab by remember { mutableIntStateOf(0) }
     var docs by remember { mutableStateOf(store.list()) }
     var editor by remember { mutableStateOf<String?>(null) }
     var editorIsHandwriting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf(Mode.SCAN) }
-    val prefs = remember { Prefs(ctx) }
     var batch by remember { mutableStateOf(true) }
-    var showCamera by remember { mutableStateOf(false) }
+    var camMode by remember { mutableStateOf<CamMode?>(null) }
+    var review by remember { mutableStateOf<ReviewState?>(null) }
+    var toolStart by remember { mutableStateOf<Tool?>(null) }
+    var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
-    var reviewPages by remember { mutableStateOf<List<Uri>?>(null) }
-    var showTools by remember { mutableStateOf(false) }
+    var selecting by remember { mutableStateOf(false) }
+    var moveDialog by remember { mutableStateOf(false) }
+    var deleteDialog by remember { mutableStateOf(false) }
+    val sel = remember { mutableStateListOf<File>() }
     val snack = remember { SnackbarHostState() }
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
-    fun refresh() { docs = store.list() }
+    fun refresh() { docs = store.list(); sel.retainAll { it.exists() } }
 
     fun runOcr(uris: List<Uri>, handwriting: Boolean) {
         scope.launch {
@@ -96,11 +105,13 @@ fun App() {
         val res = if (r.resultCode == Activity.RESULT_OK) GmsDocumentScanningResult.fromActivityResultIntent(r.data) else null
         if (res != null) scope.launch {
             val pdf = res.pdf?.uri
-            if (mode == Mode.SCAN) reviewPages = res.pages?.map { it.imageUri }
-            else {
+            val pgs = res.pages?.map { it.imageUri } ?: emptyList()
+            if (mode == Mode.SCAN) {
+                if (pgs.isNotEmpty()) { val rv = review; if (rv != null) rv.add(pgs) else review = ReviewState(pgs) }
+            } else {
                 if (pdf != null) withContext(Dispatchers.IO) { runCatching { store.importPdf(pdf, "Handwriting_" + stamp()) } }
                 refresh()
-                runOcr(res.pages?.map { it.imageUri } ?: emptyList(), true)
+                runOcr(pgs, true)
             }
         }
     }
@@ -124,180 +135,280 @@ fun App() {
             busy = "Creating PDF…"
             val ok = withContext(Dispatchers.IO) { runCatching { store.imagesToPdf(us) }.isSuccess }
             busy = null; refresh()
-            if (ok) { tab = 1; toast("PDF created") } else toast("PDF creation failed. Please try again.")
+            if (ok) { tab = 0; toast("PDF created") } else toast("PDF creation failed. Please try again.")
+        }
+    }
+    val importPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) scope.launch {
+            withContext(Dispatchers.IO) { runCatching { store.importPdf(u, "Imported_" + stamp()) } }
+            refresh(); tab = 0
         }
     }
     val imageOnly = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
 
-    if (showTools) {
-        BackHandler { showTools = false }
-        PdfToolsScreen(docs, store, { showTools = false }, ::refresh, snack, scope)
-        return
-    }
-    if (editor != null) {
-        BackHandler { editor = null }
-        EditorScreen(editor!!, editorIsHandwriting, store, { editor = null }, ::refresh, snack, scope)
-        return
+    fun openCam(m: CamMode) { if (m == CamMode.HAND && !prefs.aiReady) aiHint = true else camMode = m }
+
+    fun onCaptured(uris: List<Uri>, m: CamMode) {
+        camMode = null
+        when (m) {
+            CamMode.DOCS -> { val rv = review; if (rv != null) rv.add(uris) else review = ReviewState(uris) }
+            CamMode.TEXT -> runOcr(uris, false)
+            CamMode.HAND -> runOcr(uris, true)
+        }
     }
 
-    if (showCamera) {
-        BackHandler { showCamera = false }
-        CameraScreen(batch, { batch = it }, { uris -> showCamera = false; reviewPages = uris },
-            { showCamera = false }, { showCamera = false; startScan(Mode.SCAN) })
+    fun shareFiles(files: List<File>) {
+        if (files.isEmpty()) return
+        val uris = ArrayList(files.map { store.uri(it) })
+        val i = if (uris.size == 1) Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0])
+        else Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        i.setType("application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { ctx.startActivity(Intent.createChooser(i, null)) }
+    }
+
+    fun mergeSel() {
+        val files = sel.toList()
+        if (files.size < 2) { toast("Select 2 or more PDFs to merge."); return }
+        scope.launch {
+            busy = "Merging…"
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { store.rebuild(files.flatMap { f -> (0 until store.pageCount(f)).map { f to it } }, 1400, "Merged") }.isSuccess
+            }
+            busy = null; selecting = false; sel.clear(); refresh()
+            toast(if (ok) "Merged PDF saved" else "PDF creation failed. Please try again.")
+        }
+    }
+
+    val ts = toolStart
+    if (ts != null) {
+        BackHandler { toolStart = null }
+        PdfToolsScreen(ts, docs, store, { toolStart = null }, ::refresh, snack, scope)
         return
     }
-    val rp = reviewPages
-    if (rp != null) {
-        BackHandler { reviewPages = null }
-        ScanReviewScreen(rp, store, { reviewPages = null },
-            { reviewPages = null; refresh(); tab = 1; toast("Saved to Documents") }, { runOcr(rp, false) }, snack, scope)
+    if (showSettings) {
+        BackHandler { showSettings = false }
+        SettingsPage(prefs) { showSettings = false }
+        return
+    }
+    val ed = editor
+    if (ed != null) {
+        BackHandler { editor = null }
+        EditorScreen(ed, editorIsHandwriting, store, { editor = null }, ::refresh, snack, scope)
+        return
+    }
+    val cm = camMode
+    if (cm != null) {
+        BackHandler { camMode = null; if (review?.pages?.isEmpty() == true) review = null }
+        CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs.aiReady,
+            { uris, m -> onCaptured(uris, m) },
+            { camMode = null; if (review?.pages?.isEmpty() == true) review = null },
+            { camMode = null; startScan(Mode.SCAN) })
+        return
+    }
+    val rv = review
+    if (rv != null) {
+        BackHandler { review = null }
+        ScanReviewScreen(rv, store, snack, scope,
+            onBack = { review = null },
+            onSaved = { review = null; refresh(); tab = 0; toast("Saved to Documents") },
+            onExtract = { runOcr(rv.pages.toList(), false) },
+            onAdd = { camMode = CamMode.DOCS },
+            onRetake = { i -> rv.remove(i); camMode = CamMode.DOCS })
         busy?.let { BusyDialog(it) }
         return
     }
+
+    val sections = listOf(
+        "Scan" to listOf(
+            ToolItem(Icons.Filled.DocumentScanner, "Scan Docs", Blue) { openCam(CamMode.DOCS) },
+            ToolItem(Icons.Filled.TextFields, "To Text", Color(0xFF00A3D9)) { openCam(CamMode.TEXT) },
+            ToolItem(Icons.Filled.Edit, "Handwriting", Color(0xFF3D5AFE)) { openCam(CamMode.HAND) },
+            ToolItem(Icons.Filled.Crop, "Auto-crop", Color(0xFF0097A7)) { startScan(Mode.SCAN) }),
+        "Convert" to listOf(
+            ToolItem(Icons.Filled.PictureAsPdf, "Image to PDF", Color(0xFFE53935)) { pickImages.launch(imageOnly) },
+            ToolItem(Icons.Filled.Image, "Image to Text", Color(0xFF00A3D9)) { pickImage.launch(imageOnly) },
+            ToolItem(Icons.Filled.Folder, "Import PDF", Blue) { importPdf.launch(arrayOf("application/pdf")) }),
+        "PDF Tools" to listOf(
+            ToolItem(Icons.Filled.Layers, "Merge", Blue) { toolStart = Tool.MERGE },
+            ToolItem(Icons.Filled.ContentCut, "Split", Color(0xFF3D5AFE)) { toolStart = Tool.EXTRACT },
+            ToolItem(Icons.Filled.Delete, "Delete pages", Color(0xFFE53935)) { toolStart = Tool.DELETE },
+            ToolItem(Icons.Filled.Archive, "Compress", Color(0xFF0097A7)) { toolStart = Tool.COMPRESS }))
+
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
-        floatingActionButton = {
-            if (tab != 2) ExtendedFloatingActionButton(onClick = { showCamera = true },
-                icon = { Icon(Icons.Filled.DocumentScanner, null) }, text = { Text("Scan") },
-                containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
-        },
         bottomBar = {
-            NavigationBar {
-                NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Filled.Home, null) }, label = { Text("Home") })
-                NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Filled.Folder, null) }, label = { Text("Documents") })
-                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") })
-            }
+            if (selecting) SelectionBar(sel.size, { shareFiles(sel.toList()) }, { moveDialog = true }, { mergeSel() }, { deleteDialog = true })
+            else MainBar(tab, { tab = it }) { openCam(CamMode.DOCS) }
         }
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                0 -> HomeScreen(docs, store, ::refresh, ::toast, { tab = 1 },
-                    onScan = { showCamera = true }, onHand = { if (prefs.aiReady) startScan(Mode.HANDWRITING) else aiHint = true },
-                    onImgText = { pickImage.launch(imageOnly) }, onImgPdf = { pickImages.launch(imageOnly) }, onTools = { showTools = true }, batch = batch, onBatch = { batch = it })
-                1 -> DocumentsScreen(docs, store, ::refresh, ::toast)
-                else -> SettingsScreen(prefs)
+                0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
+                    { selecting = it; if (!it) sel.clear() }, { showSettings = true },
+                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) })
+                else -> ToolsScreen(sections)
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
                 text = { Text("Offline recognition is weak on handwriting. Turn on AI recognition in Settings (needs a free Gemini API key) for much better results.") },
-                confirmButton = { TextButton({ aiHint = false; tab = 2 }) { Text("Open Settings") } },
-                dismissButton = { TextButton({ aiHint = false; startScan(Mode.HANDWRITING) }) { Text("Continue offline") } })
-            busy?.let {
-                AlertDialog(onDismissRequest = {}, confirmButton = {}, text = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(it)
-                    }
-                })
-            }
-        }
-    }
-}
-
-@Composable
-fun HomeScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit, seeAll: () -> Unit,
-               onScan: () -> Unit, onHand: () -> Unit, onImgText: () -> Unit, onImgPdf: () -> Unit, onTools: () -> Unit,
-               batch: Boolean, onBatch: (Boolean) -> Unit) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 96.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        item {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp))
-                .background(Brush.linearGradient(listOf(Blue, Cyan))).padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(60.dp).clip(RoundedCornerShape(16.dp)))
-                    Spacer(Modifier.width(14.dp))
+                confirmButton = { TextButton({ aiHint = false; showSettings = true }) { Text("Open Settings") } },
+                dismissButton = { TextButton({ aiHint = false; camMode = CamMode.HAND }) { Text("Continue offline") } })
+            if (moveDialog) AlertDialog({ moveDialog = false }, title = { Text("Move to folder") },
+                text = {
                     Column {
-                        Text("ScanType", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                        Text("Scan. Convert. Edit. PDF.", color = Color.White.copy(alpha = 0.9f))
+                        (listOf("") + store.folders()).forEach { fl ->
+                            TextButton({
+                                sel.toList().forEach { store.move(it, fl) }
+                                moveDialog = false; selecting = false; sel.clear(); refresh()
+                            }) { Text(if (fl.isEmpty()) "No folder" else fl) }
+                        }
                     }
-                }
-            }
+                },
+                confirmButton = {}, dismissButton = { TextButton({ moveDialog = false }) { Text("Cancel") } })
+            if (deleteDialog) AlertDialog({ deleteDialog = false }, title = { Text("Delete ${sel.size} document(s)?") },
+                text = { Text("This can't be undone.") },
+                confirmButton = {
+                    TextButton({
+                        sel.toList().forEach { store.delete(it) }
+                        deleteDialog = false; selecting = false; sel.clear(); refresh()
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton({ deleteDialog = false }) { Text("Cancel") } })
+            busy?.let { BusyDialog(it) }
         }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Scan mode", style = MaterialTheme.typography.titleSmall)
-                FilterChip(!batch, { onBatch(false) }, { Text("Single page") })
-                FilterChip(batch, { onBatch(true) }, { Text("Batch") })
-            }
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionCard(Icons.Filled.DocumentScanner, "Scan Document", "Scan paper into PDF · Offline", Blue, onScan, Modifier.weight(1f))
-                    ActionCard(Icons.Filled.Edit, "Handwriting to Text", "Handwriting into editable text", Color(0xFF3D5AFE), onHand, Modifier.weight(1f))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    ActionCard(Icons.Filled.Image, "Image to Text", "Printed Hindi/English text", Color(0xFF00A3D9), onImgText, Modifier.weight(1f))
-                    ActionCard(Icons.Filled.PictureAsPdf, "Image to PDF", "Create PDF from images · Offline", Color(0xFFE53935), onImgPdf, Modifier.weight(1f))
-                }
-            }
-        }
-        item {
-            OutlinedButton(onTools, Modifier.fillMaxWidth().heightIn(min = 52.dp), shape = RoundedCornerShape(16.dp)) {
-                Icon(Icons.Filled.Build, null); Spacer(Modifier.width(8.dp)); Text("PDF Tools: merge, split, compress")
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent Documents", style = MaterialTheme.typography.titleMedium)
-                if (docs.isNotEmpty()) TextButton(seeAll) { Text("See all") }
-            }
-        }
-        if (docs.isEmpty()) item {
-            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Your scanned documents will appear here.")
-                Spacer(Modifier.height(12.dp))
-                Button(onScan) { Text("Scan Your First Document") }
-            }
-        } else items(docs.take(4), key = { it.path }) { DocRow(it, store, refresh, toast) }
     }
 }
 
 @Composable
-fun ActionCard(icon: ImageVector, title: String, sub: String, tint: Color, onClick: () -> Unit, modifier: Modifier) {
-    Card(onClick, modifier.heightIn(min = 150.dp), shape = RoundedCornerShape(24.dp),
+fun MainBar(tab: Int, onTab: (Int) -> Unit, onScan: () -> Unit) {
+    Box(Modifier.fillMaxWidth()) {
+        NavigationBar(Modifier.padding(top = 28.dp)) {
+            NavigationBarItem(tab == 0, { onTab(0) }, { Icon(Icons.Filled.Description, null) }, label = { Text("Docs") })
+            NavigationBarItem(false, {}, {}, enabled = false)
+            NavigationBarItem(tab == 1, { onTab(1) }, { Icon(Icons.Filled.Apps, null) }, label = { Text("Tools") })
+        }
+        FloatingActionButton(onScan, Modifier.align(Alignment.TopCenter).size(64.dp), shape = CircleShape,
+            containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
+            Icon(Icons.Filled.CameraAlt, "Scan", Modifier.size(30.dp))
+        }
+    }
+}
+
+@Composable
+fun SelectionBar(count: Int, onShare: () -> Unit, onMove: () -> Unit, onMerge: () -> Unit, onDelete: () -> Unit) {
+    NavigationBar {
+        NavigationBarItem(false, { if (count > 0) onShare() }, { Icon(Icons.Filled.Share, "Share") }, label = { Text("Share") })
+        NavigationBarItem(false, { if (count > 0) onMove() }, { Icon(Icons.Filled.Folder, "Move") }, label = { Text("Move") })
+        NavigationBarItem(false, { if (count > 0) onMerge() }, { Icon(Icons.Filled.Layers, "Merge") }, label = { Text("Merge") })
+        NavigationBarItem(false, { if (count > 0) onDelete() }, { Icon(Icons.Filled.Delete, "Delete") }, label = { Text("Delete") })
+    }
+}
+
+@Composable
+fun ToolsScreen(sections: List<Pair<String, List<ToolItem>>>) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 16.dp, 16.dp, 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Tools", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+        sections.forEach { (title, tools) ->
+            item { Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary) }
+            items(tools.chunked(3)) { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    row.forEach { t -> ToolTile(t, Modifier.weight(1f)) }
+                    repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+        item { Text("Everything here works offline except AI text recognition.", style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+fun ToolTile(t: ToolItem, modifier: Modifier) {
+    Card(t.onClick, modifier.heightIn(min = 112.dp), shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)) {
-        Column(Modifier.padding(16.dp)) {
-            Box(Modifier.size(48.dp).clip(CircleShape).background(tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                Icon(icon, null, tint = tint)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.size(48.dp).clip(CircleShape).background(t.tint.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                Icon(t.icon, null, tint = t.tint)
             }
-            Spacer(Modifier.height(12.dp))
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Text(sub, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(8.dp))
+            Text(t.label, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
         }
     }
 }
 
 @Composable
-fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit) {
-    val scope = rememberCoroutineScope()
+fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
+               selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
+               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit) {
     var q by remember { mutableStateOf("") }
+    var searching by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
+    var folderMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
     val folders = remember(docs) { store.folders() }
-    val importPdf = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
-        if (u != null) scope.launch {
-            withContext(Dispatchers.IO) { runCatching { store.importPdf(u, "Imported_" + stamp()) } }
-            refresh()
-        }
-    }
     val shown = docs.filter { f ->
         (folder == null || store.folderOf(f) == folder) &&
             (q.isBlank() || f.nameWithoutExtension.contains(q, true) || store.searchText(f).contains(q, true))
     }
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(q, { q = it }, Modifier.weight(1f), leadingIcon = { Icon(Icons.Filled.Search, null) },
-                placeholder = { Text("Search name or text") }, singleLine = true, shape = RoundedCornerShape(16.dp))
-            IconButton({ importPdf.launch(arrayOf("application/pdf")) }) { Icon(Icons.Filled.Add, "Import PDF") }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)))
+                Spacer(Modifier.width(10.dp))
+                Text("ScanType", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.weight(1f))
+                IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
+                IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
+            }
         }
-        LazyRow(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item { FilterChip(folder == null, { folder = null }, { Text("All") }) }
-            items(folders) { fl -> FilterChip(folder == fl, { folder = fl }, { Text(fl) }) }
-            item { AssistChip({ newFolder = true }, { Text("+ Folder") }) }
+        if (searching) item {
+            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search name or text") },
+                singleLine = true, shape = RoundedCornerShape(16.dp))
         }
-        if (shown.isEmpty()) Text("No documents found.")
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 88.dp)) {
-            items(shown, key = { it.path }) { DocRow(it, store, refresh, toast) }
+        if (!selecting) item {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+                .background(Brush.linearGradient(listOf(Blue, Cyan))).padding(18.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Scan. Convert. Edit. PDF.", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Hindi & English handwriting to typed text", color = Color.White.copy(alpha = 0.92f))
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onHand, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("Handwriting") }
+                        OutlinedButton(onText, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image to Text") }
+                    }
+                }
+            }
+        }
+        item {
+            if (selecting) Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton({ onSelecting(false) }) { Icon(Icons.Filled.Close, "Cancel") }
+                Text("${sel.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton({ sel.clear(); sel.addAll(shown) }) { Text("Select all") }
+            } else Row(verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    Row(Modifier.clip(RoundedCornerShape(8.dp)).clickable { folderMenu = true }, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${folder ?: "All docs"} (${shown.size})", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Filled.ArrowDropDown, null)
+                    }
+                    DropdownMenu(folderMenu, { folderMenu = false }) {
+                        DropdownMenuItem({ Text("All docs") }, { folder = null; folderMenu = false })
+                        folders.forEach { fl -> DropdownMenuItem({ Text(fl) }, { folder = fl; folderMenu = false }) }
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton({ newFolder = true }) { Icon(Icons.Filled.CreateNewFolder, "New folder") }
+                IconButton({ onSelecting(true) }) { Icon(Icons.Filled.CheckCircle, "Select") }
+            }
+        }
+        if (shown.isEmpty()) item {
+            Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Your scanned documents will appear here.")
+                Spacer(Modifier.height(8.dp))
+                Text("Tap the camera button to scan your first document.", style = MaterialTheme.typography.bodySmall)
+            }
+        } else items(shown, key = { it.path }) { f ->
+            DocRow(f, store, refresh, toast, selecting, f in sel) { if (f in sel) sel.remove(f) else sel.add(f) }
         }
     }
     if (newFolder) {
@@ -310,7 +421,8 @@ fun DocumentsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toas
 }
 
 @Composable
-fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit) {
+fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
+           selecting: Boolean, selected: Boolean, onToggle: () -> Unit) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
@@ -325,18 +437,26 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
         else Intent(action).setDataAndType(u, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         runCatching { ctx.startActivity(i) }.onFailure { toast("No app found to open this file.") }
     }
-    Card(onClick = { send(Intent.ACTION_VIEW) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(48.dp, 64.dp).clip(RoundedCornerShape(6.dp))) {
-                thumb?.let { Image(it.asImageBitmap(), null) } ?: Icon(Icons.Filled.PictureAsPdf, null)
+    Card(onClick = { if (selecting) onToggle() else send(Intent.ACTION_VIEW) }, modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(72.dp, 96.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center) {
+                val b = thumb
+                if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                else Icon(Icons.Filled.PictureAsPdf, null)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(f.nameWithoutExtension, maxLines = 1, style = MaterialTheme.typography.titleSmall)
-                Text("${DateFormat.getDateInstance().format(Date(f.lastModified()))} · $pages pages · ${f.length() / 1024} KB",
-                    style = MaterialTheme.typography.bodySmall)
+                Text(f.nameWithoutExtension, maxLines = 2, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                Text(DateFormat.getDateInstance().format(Date(f.lastModified())), style = MaterialTheme.typography.bodySmall)
+                Text("$pages pages · ${sizeText(f.length())}", style = MaterialTheme.typography.bodySmall)
             }
-            Box {
+            if (selecting) Checkbox(selected, null)
+            else Box {
                 IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text("Open") }, { menu = false; send(Intent.ACTION_VIEW) })
@@ -369,6 +489,14 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
         text = { Text("This can't be undone.") },
         confirmButton = { TextButton({ store.delete(f); deleting = false; refresh() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } })
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsPage(prefs: Prefs, close: () -> Unit) {
+    Scaffold(topBar = {
+        TopAppBar({ Text("Settings") }, navigationIcon = { IconButton(close) { Icon(Icons.Filled.ArrowBack, "Back") } })
+    }) { pad -> Box(Modifier.padding(pad)) { SettingsScreen(prefs) } }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

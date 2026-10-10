@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -18,10 +19,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,22 +32,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import java.io.File
 
-/** ScanType's own camera. Asks for the CAMERA permission itself, with Single / Batch capture. */
+enum class CamMode(val label: String) { DOCS("Docs"), TEXT("To Text"), HAND("Handwriting") }
+
 @Composable
-fun CameraScreen(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (List<Uri>) -> Unit,
-                 onClose: () -> Unit, onSmart: () -> Unit) {
+private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
+    Box(Modifier.clip(RoundedCornerShape(50)).background(if (selected) Cyan else Color(0x33FFFFFF))
+        .clickable { onClick() }.padding(horizontal = 16.dp, vertical = 7.dp)) {
+        Text(text, color = if (selected) Navy else Color.White, fontSize = 14.sp)
+    }
+}
+
+/** ScanType's own camera. Asks for the CAMERA permission itself. */
+@Composable
+fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, aiReady: Boolean,
+                 onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
     val ctx = LocalContext.current
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
-    if (granted) CameraContent(batch, onBatch, onDone, onClose, onSmart)
+    if (granted) CameraContent(mode, onMode, batch, onBatch, aiReady, onDone, onClose, onSmart)
     else Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text("ScanType needs the camera only to photograph your documents. Photos stay on your device.")
@@ -56,8 +71,8 @@ fun CameraScreen(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (List<Uri>)
 }
 
 @Composable
-private fun CameraContent(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (List<Uri>) -> Unit,
-                          onClose: () -> Unit, onSmart: () -> Unit) {
+private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, aiReady: Boolean,
+                          onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     val shots = remember { mutableStateListOf<Uri>() }
@@ -65,6 +80,9 @@ private fun CameraContent(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (L
     var busy by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
+        if (us.isNotEmpty()) onDone(us, mode)
+    }
 
     fun shoot() {
         if (busy) return
@@ -75,7 +93,7 @@ private fun CameraContent(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (L
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     busy = false
                     val u = Uri.fromFile(f)
-                    if (batch) shots.add(u) else onDone(listOf(u))
+                    if (batch) shots.add(u) else onDone(listOf(u), mode)
                 }
                 override fun onError(e: ImageCaptureException) {
                     busy = false
@@ -108,20 +126,34 @@ private fun CameraContent(batch: Boolean, onBatch: (Boolean) -> Unit, onDone: (L
                 Icon(if (flash) Icons.Filled.FlashOn else Icons.Filled.FlashOff, "Flash", tint = Color.White)
             }
         }
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000))
+            .navigationBarsPadding().padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(!batch, { onBatch(false) }, { Text("Single") })
-                FilterChip(batch, { onBatch(true) }, { Text("Batch") })
+                Pill("Single", !batch) { onBatch(false) }
+                Pill("Batch", batch) { onBatch(true) }
+            }
+            Row {
+                CamMode.values().forEach { m ->
+                    Text(m.label, color = if (m == mode) Cyan else Color.White,
+                        fontWeight = if (m == mode) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier.clickable {
+                            onMode(m)
+                            if (m == CamMode.HAND && !aiReady)
+                                Toast.makeText(ctx, "For accurate Hindi handwriting, turn on AI in Settings.", Toast.LENGTH_LONG).show()
+                        }.padding(horizontal = 14.dp, vertical = 6.dp))
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                    if (batch && shots.isNotEmpty()) Text("${shots.size} pages", color = Color.White)
+                Column(Modifier.width(72.dp).clickable { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(Icons.Filled.Image, "Import", tint = Color.White)
+                    Text("Import", color = Color.White, fontSize = 12.sp)
                 }
                 Box(Modifier.size(84.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
                     .clip(CircleShape).background(Color.White).clickable(enabled = !busy) { shoot() })
-                Box(Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                    if (batch && shots.isNotEmpty()) Button({ onDone(shots.toList()) }) { Text("Done") }
+                Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
+                    if (batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode) }) { Text("Done (${shots.size})") }
                 }
             }
         }

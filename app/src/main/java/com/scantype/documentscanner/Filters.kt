@@ -41,6 +41,13 @@ object ImageFilters {
         return scaled
     }
 
+    fun rotate(src: Bitmap, deg: Int): Bitmap {
+        if (deg % 360 == 0) return src
+        val out = Bitmap.createBitmap(src, 0, 0, src.width, src.height, Matrix().apply { postRotate(deg.toFloat()) }, true)
+        if (out !== src) src.recycle()
+        return out
+    }
+
     /** Returns a filtered bitmap. The source bitmap is recycled when a new one is produced. */
     fun apply(src: Bitmap, f: PageFilter): Bitmap {
         val out = when (f) {
