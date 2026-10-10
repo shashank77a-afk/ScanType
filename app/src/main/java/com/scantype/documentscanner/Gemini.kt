@@ -31,18 +31,25 @@ class Prefs(ctx: Context) {
 }
 
 private const val PROMPT =
-    "Transcribe all the text in this image exactly as written, keeping the line breaks. " +
-    "The text may be Hindi (Devanagari), English or mixed, printed or handwritten. " +
-    "If a word is unclear, give your best reading. Output only the transcribed text, with no commentary."
+    "You are an expert transcriber of Hindi (Devanagari) and English handwriting and print. " +
+    "Transcribe ALL the text in the image exactly as written.\n" +
+    "Rules:\n" +
+    "1. Do not summarize, translate, correct, modernize spelling or add any words. Keep names, numbers, dates, abbreviations and " +
+    "punctuation (like । , - :-) exactly as written.\n" +
+    "2. Keep the original line breaks and structure: headings, addresses, subject lines, list items (1. 2. 3.), signatures and closing " +
+    "lines each on their own line, and a blank line between separate paragraphs.\n" +
+    "3. Write Hindi in Devanagari and English in English. Keep mixed text as it is.\n" +
+    "4. If a word is unclear, write your best reading followed by [?]. Never invent text that is not visible.\n" +
+    "5. Output ONLY the transcribed text, with no explanation and no code fences. If nothing is legible, output exactly: UNREADABLE"
 
 /** Cloud recognition via Google Gemini, using the user's own API key. Only used when the user turns it on. */
 class GeminiOcrEngine(private val prefs: Prefs) : OcrEngine {
     override val requiresInternet = true
     override suspend fun recognize(ctx: Context, uri: Uri): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            val bmp = ImageFilters.load(ctx, uri, 1600)
+            val bmp = ImageFilters.load(ctx, uri, 2000)
             val bos = ByteArrayOutputStream()
-            bmp.compress(Bitmap.CompressFormat.JPEG, 85, bos); bmp.recycle()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 90, bos); bmp.recycle()
             val b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
             val body = JSONObject().put("contents", JSONArray().put(JSONObject().put("parts", JSONArray()
                 .put(JSONObject().put("text", PROMPT))

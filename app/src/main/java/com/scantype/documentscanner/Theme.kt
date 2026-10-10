@@ -5,16 +5,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val Blue = Color(0xFF0A5BFF)
-val Cyan = Color(0xFF00C2FF)
-val Navy = Color(0xFF0A1633)
+// Brand colours. The names come from the first version; the values are now the green theme.
+val Blue = Color(0xFF0A7F4F)   // primary green
+val Cyan = Color(0xFF3DDC97)   // mint accent
+val Navy = Color(0xFF07261A)   // deep green-black
 
 @Composable
 fun ScanTypeTheme(content: @Composable () -> Unit) {
     val scheme = if (isSystemInDarkTheme())
-        darkColorScheme(primary = Cyan, onPrimary = Navy, background = Navy, surface = Color(0xFF11214A),
-            surfaceVariant = Color(0xFF14264D), secondaryContainer = Color(0xFF14264D))
-    else lightColorScheme(primary = Blue, secondary = Cyan, background = Color(0xFFF6F9FF),
-        surface = Color.White, surfaceVariant = Color(0xFFE8F0FF), secondaryContainer = Color(0xFFD6E6FF))
+        darkColorScheme(primary = Cyan, onPrimary = Navy, primaryContainer = Color(0xFF0F5C3C), onPrimaryContainer = Color.White,
+            background = Navy, surface = Color(0xFF0F3324), surfaceVariant = Color(0xFF164532), secondaryContainer = Color(0xFF164532))
+    else lightColorScheme(primary = Blue, secondary = Cyan, background = Color(0xFFF3FAF6), surface = Color.White,
+        surfaceVariant = Color(0xFFE0F2E9), secondaryContainer = Color(0xFFCDEBDD))
     MaterialTheme(colorScheme = scheme, content = content)
 }

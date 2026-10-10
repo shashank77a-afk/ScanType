@@ -39,6 +39,12 @@ class DocStore(private val ctx: Context) {
     fun importPdf(uri: Uri, base: String) {
         ctx.contentResolver.openInputStream(uri)!!.use { i -> unique(base).outputStream().use { i.copyTo(it) } }
     }
+    fun newFileExt(base: String, ext: String): File {
+        val c = clean(base).ifEmpty { "Document" }
+        var f = File(dir, "$c.$ext"); var n = 1
+        while (f.exists()) f = File(dir, "${c}_${n++}.$ext")
+        return f
+    }
     fun sidecar(f: File) = File(f.parentFile, f.nameWithoutExtension + ".txt")
     fun searchText(f: File): String =
         runCatching { sidecar(f).takeIf { it.exists() }?.readText() ?: "" }.getOrDefault("")

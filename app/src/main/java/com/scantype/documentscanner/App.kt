@@ -81,22 +81,33 @@ fun App() {
     var deleteDialog by remember { mutableStateOf(false) }
     val sel = remember { mutableStateListOf<File>() }
     val snack = remember { SnackbarHostState() }
+    var cropIdx by remember { mutableStateOf<Int?>(null) }
+    var idQueue by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var idDone by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var studio by remember { mutableStateOf<StudioInit?>(null) }
+    val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Gallery on this Android version.") } }
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list(); sel.retainAll { it.exists() } }
 
     fun runOcr(uris: List<Uri>, handwriting: Boolean) {
         scope.launch {
             val engine = if (prefs.aiReady) GeminiOcrEngine(prefs) else if (handwriting) Engines.handwriting else Engines.printed
-            val out = StringBuilder(); var failed = 0
+            val out = StringBuilder(); var failed = 0; var unreadable = 0
             uris.forEachIndexed { i, u ->
                 busy = "Reading page ${i + 1} of ${uris.size}…"
-                engine.recognize(ctx, u).onSuccess { out.append(it.trim()).append("\n\n") }.onFailure { failed++ }
+                engine.recognize(ctx, u)
+                    .onSuccess { if (it.trim() == "UNREADABLE") unreadable++ else out.append(it.trim()).append("\n\n") }
+                    .onFailure { failed++ }
             }
             busy = null
-            if (out.isBlank()) toast(if (prefs.aiReady) "AI recognition failed. Check your internet connection and API key in Settings." else "We couldn't recognize this page. Please try again with better lighting.")
+            if (out.isBlank()) toast(
+                if (unreadable > 0) "The text is not clear enough. Please rescan closer, in focus and in better light."
+                else if (prefs.aiReady) "AI recognition failed. Check your internet connection and API key in Settings."
+                else "We couldn't recognize this page. Please try again with better lighting.")
             else {
                 editorIsHandwriting = handwriting; editor = out.toString().trim()
-                if (failed > 0) toast("Some pages could not be read.")
+                if (failed + unreadable > 0) toast("Some pages could not be read. You can rescan them.")
+                else if (Regex("\\[\\?\\]").findAll(out).count() >= 3) toast("Some words are unclear and marked [?]. Review them, or rescan in better light.")
             }
         }
     }
@@ -154,6 +165,7 @@ fun App() {
             CamMode.DOCS -> { val rv = review; if (rv != null) rv.add(uris) else review = ReviewState(uris) }
             CamMode.TEXT -> runOcr(uris, false)
             CamMode.HAND -> runOcr(uris, true)
+            CamMode.ID -> { idQueue = uris; idDone = emptyList() }
         }
     }
 
@@ -179,6 +191,19 @@ fun App() {
         }
     }
 
+    fun galleryFiles() {
+        val files = sel.toList()
+        if (files.isEmpty()) return
+        gate {
+            scope.launch {
+                busy = "Saving to Gallery…"
+                val n = withContext(Dispatchers.IO) { files.sumOf { Export.savePdfToGallery(ctx, it, false) } }
+                busy = null; selecting = false; sel.clear()
+                toast(if (n > 0) "Saved $n image(s) to Gallery" else "Could not save to Gallery. Please try again.")
+            }
+        }
+    }
+
     val ts = toolStart
     if (ts != null) {
         BackHandler { toolStart = null }
@@ -190,10 +215,17 @@ fun App() {
         SettingsPage(prefs) { showSettings = false }
         return
     }
+    val st = studio
+    if (st != null) {
+        BackHandler { studio = null }
+        StudioScreen(st, store, snack, scope, { studio = null },
+            { studio = null; editor = null; refresh(); tab = 0; toast("Saved to Documents") })
+        return
+    }
     val ed = editor
     if (ed != null) {
         BackHandler { editor = null }
-        EditorScreen(ed, editorIsHandwriting, store, { editor = null }, ::refresh, snack, scope)
+        EditorScreen(ed, editorIsHandwriting, store, { editor = null }, ::refresh, snack, scope) { s -> studio = StudioInit(s, DocTemplate.PLAIN) }
         return
     }
     val cm = camMode
@@ -205,7 +237,34 @@ fun App() {
             { camMode = null; startScan(Mode.SCAN) })
         return
     }
+    if (idQueue.isNotEmpty()) {
+        val k = idDone.size
+        BackHandler { idQueue = emptyList(); idDone = emptyList() }
+        CropScreen(idQueue[k], 0, if (k == 0) "Crop the FRONT side" else "Crop the BACK side",
+            onDone = { u ->
+                val d = idDone + u
+                if (d.size >= idQueue.size) {
+                    idQueue = emptyList(); idDone = emptyList()
+                    scope.launch {
+                        busy = "Preparing ID card page…"
+                        val res = withContext(Dispatchers.IO) { runCatching { IdCard.combine(ctx, d) }.getOrNull() }
+                        busy = null
+                        if (res != null) review = ReviewState(listOf(res)) else toast("Could not prepare the ID card page. Please try again.")
+                    }
+                } else idDone = d
+            },
+            onCancel = { idQueue = emptyList(); idDone = emptyList() })
+        return
+    }
     val rv = review
+    val ci = cropIdx
+    if (rv != null && ci != null && ci < rv.pages.size) {
+        BackHandler { cropIdx = null }
+        CropScreen(rv.pages[ci], rv.rots[ci], "Crop page ${ci + 1}",
+            onDone = { u -> rv.pages[ci] = u; rv.rots[ci] = 0; cropIdx = null },
+            onCancel = { cropIdx = null })
+        return
+    }
     if (rv != null) {
         BackHandler { review = null }
         ScanReviewScreen(rv, store, snack, scope,
@@ -213,7 +272,8 @@ fun App() {
             onSaved = { review = null; refresh(); tab = 0; toast("Saved to Documents") },
             onExtract = { runOcr(rv.pages.toList(), false) },
             onAdd = { camMode = CamMode.DOCS },
-            onRetake = { i -> rv.remove(i); camMode = CamMode.DOCS })
+            onRetake = { i -> rv.remove(i); camMode = CamMode.DOCS },
+            onCrop = { i -> cropIdx = i })
         busy?.let { BusyDialog(it) }
         return
     }
@@ -221,23 +281,27 @@ fun App() {
     val sections = listOf(
         "Scan" to listOf(
             ToolItem(Icons.Filled.DocumentScanner, "Scan Docs", Blue) { openCam(CamMode.DOCS) },
-            ToolItem(Icons.Filled.TextFields, "To Text", Color(0xFF00A3D9)) { openCam(CamMode.TEXT) },
-            ToolItem(Icons.Filled.Edit, "Handwriting", Color(0xFF3D5AFE)) { openCam(CamMode.HAND) },
-            ToolItem(Icons.Filled.Crop, "Auto-crop", Color(0xFF0097A7)) { startScan(Mode.SCAN) }),
+            ToolItem(Icons.Filled.Description, "ID Card", Color(0xFF00897B)) { openCam(CamMode.ID) },
+            ToolItem(Icons.Filled.TextFields, "To Text", Color(0xFF2E7D32)) { openCam(CamMode.TEXT) },
+            ToolItem(Icons.Filled.Edit, "Handwriting", Blue) { openCam(CamMode.HAND) },
+            ToolItem(Icons.Filled.Crop, "Auto-crop", Color(0xFF00695C)) { startScan(Mode.SCAN) }),
+        "Create" to listOf(
+            ToolItem(Icons.Filled.Edit, "Text to PDF / Word", Blue) { studio = StudioInit("", DocTemplate.PLAIN) },
+            ToolItem(Icons.Filled.Description, "Official Letter", Color(0xFF00897B)) { studio = StudioInit("", DocTemplate.LETTER) }),
         "Convert" to listOf(
             ToolItem(Icons.Filled.PictureAsPdf, "Image to PDF", Color(0xFFE53935)) { pickImages.launch(imageOnly) },
-            ToolItem(Icons.Filled.Image, "Image to Text", Color(0xFF00A3D9)) { pickImage.launch(imageOnly) },
+            ToolItem(Icons.Filled.Image, "Select Image to Text", Color(0xFF2E7D32)) { pickImage.launch(imageOnly) },
             ToolItem(Icons.Filled.Folder, "Import PDF", Blue) { importPdf.launch(arrayOf("application/pdf")) }),
         "PDF Tools" to listOf(
             ToolItem(Icons.Filled.Layers, "Merge", Blue) { toolStart = Tool.MERGE },
-            ToolItem(Icons.Filled.ContentCut, "Split", Color(0xFF3D5AFE)) { toolStart = Tool.EXTRACT },
+            ToolItem(Icons.Filled.ContentCut, "Split", Color(0xFF00897B)) { toolStart = Tool.EXTRACT },
             ToolItem(Icons.Filled.Delete, "Delete pages", Color(0xFFE53935)) { toolStart = Tool.DELETE },
-            ToolItem(Icons.Filled.Archive, "Compress", Color(0xFF0097A7)) { toolStart = Tool.COMPRESS }))
+            ToolItem(Icons.Filled.Archive, "Compress", Color(0xFF00695C)) { toolStart = Tool.COMPRESS }))
 
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
-            if (selecting) SelectionBar(sel.size, { shareFiles(sel.toList()) }, { moveDialog = true }, { mergeSel() }, { deleteDialog = true })
+            if (selecting) SelectionBar(sel.size, { shareFiles(sel.toList()) }, { galleryFiles() }, { moveDialog = true }, { mergeSel() }, { deleteDialog = true })
             else MainBar(tab, { tab = it }) { openCam(CamMode.DOCS) }
         }
     ) { pad ->
@@ -245,7 +309,7 @@ fun App() {
             when (tab) {
                 0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
-                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) })
+                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) })
                 else -> ToolsScreen(sections)
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
@@ -294,9 +358,10 @@ fun MainBar(tab: Int, onTab: (Int) -> Unit, onScan: () -> Unit) {
 }
 
 @Composable
-fun SelectionBar(count: Int, onShare: () -> Unit, onMove: () -> Unit, onMerge: () -> Unit, onDelete: () -> Unit) {
+fun SelectionBar(count: Int, onShare: () -> Unit, onGallery: () -> Unit, onMove: () -> Unit, onMerge: () -> Unit, onDelete: () -> Unit) {
     NavigationBar {
         NavigationBarItem(false, { if (count > 0) onShare() }, { Icon(Icons.Filled.Share, "Share") }, label = { Text("Share") })
+        NavigationBarItem(false, { if (count > 0) onGallery() }, { Icon(Icons.Filled.Image, "Save to Gallery") }, label = { Text("Gallery") })
         NavigationBarItem(false, { if (count > 0) onMove() }, { Icon(Icons.Filled.Folder, "Move") }, label = { Text("Move") })
         NavigationBarItem(false, { if (count > 0) onMerge() }, { Icon(Icons.Filled.Layers, "Merge") }, label = { Text("Merge") })
         NavigationBarItem(false, { if (count > 0) onDelete() }, { Icon(Icons.Filled.Delete, "Delete") }, label = { Text("Delete") })
@@ -339,7 +404,7 @@ fun ToolTile(t: ToolItem, modifier: Modifier) {
 @Composable
 fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
                selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
-               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit) {
+               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit) {
     var q by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
@@ -373,9 +438,14 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                     Text("Scan. Convert. Edit. PDF.", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Text("Hindi & English handwriting to typed text", color = Color.White.copy(alpha = 0.92f))
                     Spacer(Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onHand, colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("Handwriting") }
-                        OutlinedButton(onText, colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image to Text") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        val pad = PaddingValues(horizontal = 6.dp)
+                        Button(onHand, Modifier.weight(1f), contentPadding = pad,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("Handwriting", fontSize = 12.sp) }
+                        OutlinedButton(onText, Modifier.weight(1f), contentPadding = pad,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image→Text", fontSize = 12.sp) }
+                        OutlinedButton(onPdf, Modifier.weight(1f), contentPadding = pad,
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Text→PDF", fontSize = 12.sp) }
                     }
                 }
             }
@@ -428,6 +498,8 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
     var renaming by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var moving by remember { mutableStateOf(false) }
+    val rowScope = rememberCoroutineScope()
+    val rowGate = rememberWriteGate { toast("Storage permission is needed to save to Gallery on this Android version.") }
     val thumb by produceState<Bitmap?>(null, f.path, f.lastModified()) { value = withContext(Dispatchers.IO) { store.thumb(f) } }
     val pages by produceState(0, f.path, f.lastModified()) { value = withContext(Dispatchers.IO) { store.pageCount(f) } }
     fun send(action: String) {
@@ -462,6 +534,16 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
                     DropdownMenuItem({ Text("Open") }, { menu = false; send(Intent.ACTION_VIEW) })
                     DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = true })
                     DropdownMenuItem({ Text("Share") }, { menu = false; send(Intent.ACTION_SEND) })
+                    DropdownMenuItem({ Text("Print") }, { menu = false; Export.print(ctx, f, f.nameWithoutExtension) })
+                    DropdownMenuItem({ Text("Save to Gallery") }, {
+                        menu = false
+                        rowGate {
+                            rowScope.launch {
+                                val n = withContext(Dispatchers.IO) { Export.savePdfToGallery(ctx, f, false) }
+                                toast(if (n > 0) "Saved $n image(s) to Gallery" else "Could not save to Gallery. Please try again.")
+                            }
+                        }
+                    })
                     DropdownMenuItem({ Text("Duplicate") }, { menu = false; store.duplicate(f); refresh() })
                     DropdownMenuItem({ Text("Move") }, { menu = false; moving = true })
                     DropdownMenuItem({ Text("Delete") }, { menu = false; deleting = true })
@@ -502,7 +584,7 @@ fun SettingsPage(prefs: Prefs, close: () -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditorScreen(initial: String, handwriting: Boolean, store: DocStore, close: () -> Unit, refresh: () -> Unit,
-                 snack: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope) {
+                 snack: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, onCreate: (String) -> Unit) {
     val ctx = LocalContext.current
     var text by remember { mutableStateOf(initial) }
     Scaffold(
@@ -511,6 +593,8 @@ fun EditorScreen(initial: String, handwriting: Boolean, store: DocStore, close: 
     ) { pad ->
         Column(Modifier.padding(pad).padding(16.dp)) {
             if (handwriting) Text("Handwriting recognition can make mistakes. Please review and correct the text.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            if (text.contains("[?]")) Text("Words marked [?] are unclear. Please check them, or rescan in better light.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -521,13 +605,7 @@ fun EditorScreen(initial: String, handwriting: Boolean, store: DocStore, close: 
                 OutlinedButton({
                     ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
                 }) { Text("Share") }
-                Button({
-                    scope.launch {
-                        val ok = withContext(Dispatchers.IO) { runCatching { store.textToPdf(text) }.isSuccess }
-                        refresh()
-                        snack.showSnackbar(if (ok) "Typed PDF saved to Documents" else "PDF creation failed. Please try again.")
-                    }
-                }) { Text("Typed PDF") }
+                Button({ onCreate(text) }) { Text("Create PDF") }
             }
         }
     }

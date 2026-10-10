@@ -17,7 +17,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.*
@@ -53,20 +55,25 @@ class ReviewState(initial: List<Uri>) {
 
 @Composable
 private fun BarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Column(Modifier.clickable { onClick() }.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.clickable { onClick() }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, label, tint = Color.White)
-        Text(label, color = Color.White, fontSize = 12.sp)
+        Text(label, color = Color.White, fontSize = 11.sp)
     }
 }
 
 @Composable
 fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, scope: CoroutineScope,
-                     onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAdd: () -> Unit, onRetake: (Int) -> Unit) {
+                     onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAdd: () -> Unit,
+                     onRetake: (Int) -> Unit, onCrop: (Int) -> Unit) {
     val ctx = LocalContext.current
     if (r.pages.isEmpty()) { LaunchedEffect(Unit) { onBack() }; return }
     var idx by remember { mutableIntStateOf(0) }
     var applyAll by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
+    var gDialog by remember { mutableStateOf(false) }
+    var gPng by remember { mutableStateOf(false) }
+    var gAll by remember { mutableStateOf(true) }
+    val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save images on this Android version.") } }
     val cur = idx.coerceIn(0, r.pages.size - 1)
     val page = r.pages[cur]; val flt = r.filters[cur]; val rot = r.rots[cur]
 
@@ -99,6 +106,30 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
             }
             saving = false
             if (ok) onSaved() else snack.showSnackbar("PDF creation failed. Please try again.")
+        }
+    }
+
+    fun saveToGallery() {
+        val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList()
+        val name = r.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Scan" }
+        val which = if (gAll) pages.indices.toList() else listOf(cur)
+        val png = gPng
+        scope.launch {
+            saving = true
+            val n = withContext(Dispatchers.IO) {
+                var count = 0
+                for (i in which) {
+                    val ok = runCatching {
+                        val b = ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i])
+                        val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
+                        b.recycle(); res
+                    }.getOrDefault(false)
+                    if (ok) count++
+                }
+                count
+            }
+            saving = false
+            snack.showSnackbar(if (n > 0) "Saved $n image(s) to Gallery (Pictures/ScanType)" else "Could not save to Gallery. Please try again.")
         }
     }
 
@@ -138,7 +169,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
                     Column(Modifier.clickable {
                         if (applyAll) { for (i in r.filters.indices) r.filters[i] = f } else r.filters[cur] = f
                     }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(80.dp, 104.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF1B2B55))
+                        Box(Modifier.size(80.dp, 104.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
                             .then(if (sel) Modifier.border(3.dp, Cyan, RoundedCornerShape(10.dp)) else Modifier)) {
                             thumbs[f]?.let { Image(it.asImageBitmap(), f.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                         }
@@ -149,9 +180,27 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
                 BarButton(Icons.Filled.Add, "Add") { onAdd() }
-                BarButton(Icons.Filled.RotateLeft, "Left") { r.rots[cur] = (rot + 270) % 360 }
-                BarButton(Icons.Filled.TextFields, "Extract Text") { onExtract() }
+                BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
+                BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
+                BarButton(Icons.Filled.TextFields, "Text") { onExtract() }
+                BarButton(Icons.Filled.Image, "Gallery") { gDialog = true }
             }
         }
     }
+    if (gDialog) AlertDialog({ gDialog = false }, title = { Text("Save to Gallery") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Saves the edited image(s) to your phone's Gallery, in the folder Pictures/ScanType.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(!gPng, { gPng = false }, { Text("JPG") })
+                    FilterChip(gPng, { gPng = true }, { Text("PNG") })
+                }
+                if (r.pages.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(gAll, { gAll = true }, { Text("All ${r.pages.size} pages") })
+                    FilterChip(!gAll, { gAll = false }, { Text("This page") })
+                }
+            }
+        },
+        confirmButton = { TextButton({ gDialog = false; gate { saveToGallery() } }) { Text("Save") } },
+        dismissButton = { TextButton({ gDialog = false }) { Text("Cancel") } })
 }

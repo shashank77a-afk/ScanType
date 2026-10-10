@@ -1,8 +1,10 @@
 package com.scantype.documentscanner
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -37,9 +39,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import java.io.File
 
-enum class CamMode(val label: String) { DOCS("Docs"), TEXT("To Text"), HAND("Handwriting") }
+enum class CamMode(val label: String) { DOCS("Docs"), ID("ID Card"), TEXT("To Text"), HAND("Handwriting") }
 
 @Composable
 private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
@@ -49,22 +53,35 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** ScanType's own camera. Asks for the CAMERA permission itself. */
+/** ScanType's own camera. Asks for the CAMERA permission itself and explains what to do if it is denied. */
 @Composable
 fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, aiReady: Boolean,
                  onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
     val ctx = LocalContext.current
-    var granted by remember {
-        mutableStateOf(ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+    val owner = ctx as ComponentActivity
+    fun has() = ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    var granted by remember { mutableStateOf(has()) }
+    var denied by remember { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> granted = ok; if (!ok) denied = true }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
+        if (us.isNotEmpty()) onDone(us, mode)
     }
-    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it }
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) granted = has() }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
     if (granted) CameraContent(mode, onMode, batch, onBatch, aiReady, onDone, onClose, onSmart)
-    else Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("ScanType needs the camera only to photograph your documents. Photos stay on your device.")
+    else Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
+        Text(if (denied) "Camera permission was denied. Allow it to scan with the camera, or choose images from your gallery."
+        else "ScanType needs the camera only to photograph your documents. Photos stay on your device.")
         Spacer(Modifier.height(16.dp))
         Button({ ask.launch(Manifest.permission.CAMERA) }) { Text("Allow camera") }
+        OutlinedButton({
+            ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
+        }) { Text("Open app settings") }
+        OutlinedButton({ pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text("Choose from gallery") }
         TextButton(onSmart) { Text("Use the Google scanner instead") }
         TextButton(onClose) { Text("Close") }
     }
@@ -80,6 +97,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     var busy by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
+    LaunchedEffect(mode) { shots.clear() }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
         if (us.isNotEmpty()) onDone(us, mode)
     }
@@ -93,7 +111,8 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     busy = false
                     val u = Uri.fromFile(f)
-                    if (batch) shots.add(u) else onDone(listOf(u), mode)
+                    if (mode == CamMode.ID) { shots.add(u); if (shots.size >= 2) onDone(shots.toList(), mode) }
+                    else if (batch) shots.add(u) else onDone(listOf(u), mode)
                 }
                 override fun onError(e: ImageCaptureException) {
                     busy = false
@@ -129,7 +148,9 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000))
             .navigationBarsPadding().padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (mode == CamMode.ID) Text(if (shots.isEmpty()) "ID Card: capture the FRONT side" else "Now capture the BACK side",
+                color = Color.White, fontSize = 15.sp)
+            else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Single", !batch) { onBatch(false) }
                 Pill("Batch", batch) { onBatch(true) }
             }
@@ -141,19 +162,19 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                             onMode(m)
                             if (m == CamMode.HAND && !aiReady)
                                 Toast.makeText(ctx, "For accurate Hindi handwriting, turn on AI in Settings.", Toast.LENGTH_LONG).show()
-                        }.padding(horizontal = 14.dp, vertical = 6.dp))
+                        }.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.width(72.dp).clickable { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Filled.Image, "Import", tint = Color.White)
-                    Text("Import", color = Color.White, fontSize = 12.sp)
+                    Icon(Icons.Filled.Image, "Gallery", tint = Color.White)
+                    Text("Gallery", color = Color.White, fontSize = 12.sp)
                 }
                 Box(Modifier.size(84.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
                     .clip(CircleShape).background(Color.White).clickable(enabled = !busy) { shoot() })
                 Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
-                    if (batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode) }) { Text("Done (${shots.size})") }
+                    if (mode != CamMode.ID && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode) }) { Text("Done (${shots.size})") }
                 }
             }
         }

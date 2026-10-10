@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.*
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -96,5 +97,44 @@ object ImageFilters {
             }
         }
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.setPixels(p, 0, w, 0, 0, w, h) }
+    }
+
+    /** Straightens a document: [xy] holds 4 corners (TL, TR, BR, BL) as 0..1 fractions of the image. */
+    fun warp(src: Bitmap, xy: FloatArray): Bitmap {
+        val w = src.width.toFloat(); val h = src.height.toFloat()
+        val s = FloatArray(8) { if (it % 2 == 0) xy[it] * w else xy[it] * h }
+        fun d(a: Int, b: Int) = Math.hypot((s[a * 2] - s[b * 2]).toDouble(), (s[a * 2 + 1] - s[b * 2 + 1]).toDouble()).toFloat()
+        val dw = max(d(0, 1), d(3, 2)).toInt().coerceAtLeast(50)
+        val dh = max(d(0, 3), d(1, 2)).toInt().coerceAtLeast(50)
+        val dst = floatArrayOf(0f, 0f, dw.toFloat(), 0f, dw.toFloat(), dh.toFloat(), 0f, dh.toFloat())
+        val m = Matrix()
+        m.setPolyToPoly(s, 0, dst, 0, 4)
+        val out = Bitmap.createBitmap(dw, dh, Bitmap.Config.ARGB_8888)
+        Canvas(out).drawBitmap(src, m, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+        return out
+    }
+}
+
+object IdCard {
+    /** Puts the cropped ID sides on one A4 page at about real size (for printing). */
+    fun combine(ctx: Context, uris: List<Uri>): Uri {
+        val pw = 1240; val ph = 1754
+        val page = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
+        val c = Canvas(page); c.drawColor(Color.WHITE)
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.LTGRAY }
+        var y = 220f
+        for (u in uris) {
+            val b = ImageFilters.load(ctx, u, 1600)
+            val tw = 520f; val th = tw * b.height / b.width
+            val left = (pw - tw) / 2
+            c.drawBitmap(b, null, RectF(left, y, left + tw, y + th), Paint(Paint.FILTER_BITMAP_FLAG))
+            c.drawRect(left, y, left + tw, y + th, border)
+            y += th + 120f
+            b.recycle()
+        }
+        val f = File(ctx.cacheDir, "id_${System.currentTimeMillis()}.jpg")
+        f.outputStream().use { page.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        page.recycle()
+        return Uri.fromFile(f)
     }
 }
