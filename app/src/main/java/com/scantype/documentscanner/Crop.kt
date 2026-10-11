@@ -2,6 +2,7 @@ package com.scantype.documentscanner
 
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -46,10 +47,20 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
     }
     val pts = remember { mutableStateListOf(Offset(0.06f, 0.06f), Offset(0.94f, 0.06f), Offset(0.94f, 0.94f), Offset(0.06f, 0.94f)) }
     var working by remember { mutableStateOf(false) }
+    fun auto(manual: Boolean) {
+        val b = bmp ?: return
+        scope.launch {
+            val q = withContext(Dispatchers.Default) { EdgeDetect.detectBitmap(b) }
+            if (q != null) { for (i in 0 until 4) pts[i] = Offset(q[i * 2], q[i * 2 + 1]) }
+            else if (manual) Toast.makeText(ctx, "Edges not found. Please drag the corners.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    LaunchedEffect(bmp) { if (bmp != null) auto(false) }
     Scaffold(containerColor = Navy) { pad ->
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f))
+                TextButton({ auto(true) }) { Text("Auto", color = Cyan) }
                 TextButton({
                     pts[0] = Offset(0.06f, 0.06f); pts[1] = Offset(0.94f, 0.06f)
                     pts[2] = Offset(0.94f, 0.94f); pts[3] = Offset(0.06f, 0.94f)

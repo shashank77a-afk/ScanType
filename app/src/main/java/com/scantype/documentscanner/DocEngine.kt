@@ -15,6 +15,7 @@ import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.style.LeadingMarginSpan
+import android.text.style.StyleSpan
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -33,11 +34,30 @@ data class DocSpec(
     val lineSpacing: Float = 1.3f,
     val page: PageSize = PageSize.A4,
     val joinLines: Boolean = true,
-    val margin: Int = 56)
+    val margin: Int = 56,
+    val paraGap: Float = 1f)
 
 /** One paragraph of the document. Sizes are in points. */
 class Block(val text: String, val bold: Boolean = false, val align: DocAlign = DocAlign.LEFT,
             val first: Float = 0f, val left: Float = 0f, val before: Float = 0f, val after: Float = 6f, val scale: Float = 1f)
+
+class Run(val text: String, val bold: Boolean, val italic: Boolean)
+
+/** **bold** and *italic* markers inside a paragraph. */
+object Inline {
+    private val RX = Regex("\\*\\*(.+?)\\*\\*|\\*(\\S(?:[^*\\n]*?\\S)?)\\*")
+    fun runs(s: String): List<Run> {
+        val out = ArrayList<Run>(); var pos = 0
+        for (m in RX.findAll(s)) {
+            if (m.range.first > pos) out.add(Run(s.substring(pos, m.range.first), false, false))
+            if (m.groups[1] != null) out.add(Run(m.groupValues[1], true, false)) else out.add(Run(m.groupValues[2], false, true))
+            pos = m.range.last + 1
+        }
+        if (pos < s.length) out.add(Run(s.substring(pos), false, false))
+        return out
+    }
+    fun plain(s: String) = runs(s).joinToString("") { it.text }
+}
 
 /** Turns typed or recognised text into formatted paragraphs. Never changes the words. */
 object DocFormatter {
@@ -138,17 +158,26 @@ object DocFormatter {
 /** Real-text PDF writer. Fonts come from the phone, so Hindi (Devanagari) renders without boxes. */
 object DocPdf {
     fun render(spec: DocSpec, out: File) {
+        val doc = PdfDocument()
+        try {
+            renderInto(doc, 1, spec)
+            out.outputStream().use { doc.writeTo(it) }
+        } finally { doc.close() }
+    }
+
+    /** Draws the document into an existing PdfDocument. Returns how many pages were added. */
+    fun renderInto(doc: PdfDocument, firstPageNo: Int, spec: DocSpec): Int {
         val blocks = DocFormatter.blocks(spec)
         val pw = spec.page.wPt; val ph = spec.page.hPt; val m = spec.margin
         val cw = pw - 2 * m; val chh = (ph - 2 * m).toFloat()
-        val doc = PdfDocument()
-        var pageNo = 0
+        var pageNo = firstPageNo - 1
+        var added = 0
         var page: PdfDocument.Page? = null
         var canvas: Canvas? = null
         var y = 0f
         fun newPage() {
             page?.let { doc.finishPage(it) }
-            pageNo++
+            pageNo++; added++
             val p = doc.startPage(PdfDocument.PageInfo.Builder(pw, ph, pageNo).create())
             p.canvas.drawColor(Color.WHITE)
             page = p; canvas = p.canvas; y = 0f
@@ -159,48 +188,55 @@ object DocPdf {
             c.save(); c.translate(m.toFloat(), m + y - top); c.clipRect(0f, top, cw.toFloat(), bottom); layout.draw(c); c.restore()
             y += bottom - top
         }
-        try {
-            newPage()
-            for (b in blocks) {
-                if (b.text.isBlank()) continue
-                val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.BLACK; textSize = spec.fontSize * b.scale
-                    typeface = if (b.bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
-                }
-                val sp = SpannableString(b.text)
-                sp.setSpan(LeadingMarginSpan.Standard((b.left + b.first).toInt().coerceAtLeast(0), b.left.toInt()),
-                    0, sp.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
-                val lb = StaticLayout.Builder.obtain(sp, 0, sp.length, paint, cw)
-                    .setAlignment(when (b.align) {
-                        DocAlign.CENTER -> Layout.Alignment.ALIGN_CENTER
-                        DocAlign.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
-                        else -> Layout.Alignment.ALIGN_NORMAL
-                    })
-                    .setLineSpacing(0f, spec.lineSpacing)
-                if (Build.VERSION.SDK_INT >= 26 && b.align == DocAlign.JUSTIFY) lb.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
-                val layout = lb.build()
-                if (y > 0f) y += b.before
-                val h = layout.height.toFloat()
-                when {
-                    y + h <= chh -> { draw(layout, 0, layout.lineCount); y += b.after }
-                    h <= chh -> { newPage(); draw(layout, 0, layout.lineCount); y += b.after }
-                    else -> {
-                        var line = 0
-                        while (line < layout.lineCount) {
-                            val top = layout.getLineTop(line)
-                            var end = line
-                            while (end < layout.lineCount && y + (layout.getLineBottom(end) - top) <= chh) end++
-                            if (end == line) { if (y > 0f) { newPage(); continue } else end = line + 1 }
-                            draw(layout, line, end); line = end
-                            if (line < layout.lineCount) newPage()
-                        }
-                        y += b.after
+        newPage()
+        for (b in blocks) {
+            val runs = Inline.runs(b.text)
+            val plain = runs.joinToString("") { it.text }
+            if (plain.isBlank()) continue
+            val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.BLACK; textSize = spec.fontSize * b.scale
+                typeface = if (b.bold) Typeface.create(Typeface.DEFAULT, Typeface.BOLD) else Typeface.DEFAULT
+            }
+            val sp = SpannableString(plain)
+            sp.setSpan(LeadingMarginSpan.Standard((b.left + b.first).toInt().coerceAtLeast(0), b.left.toInt()),
+                0, sp.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+            var at = 0
+            for (r in runs) {
+                val style = if (r.bold && r.italic) Typeface.BOLD_ITALIC else if (r.bold) Typeface.BOLD else if (r.italic) Typeface.ITALIC else -1
+                if (style >= 0 && r.text.isNotEmpty()) sp.setSpan(StyleSpan(style), at, at + r.text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                at += r.text.length
+            }
+            val lb = StaticLayout.Builder.obtain(sp, 0, sp.length, paint, cw)
+                .setAlignment(when (b.align) {
+                    DocAlign.CENTER -> Layout.Alignment.ALIGN_CENTER
+                    DocAlign.RIGHT -> Layout.Alignment.ALIGN_OPPOSITE
+                    else -> Layout.Alignment.ALIGN_NORMAL
+                })
+                .setLineSpacing(0f, spec.lineSpacing)
+            if (Build.VERSION.SDK_INT >= 26 && b.align == DocAlign.JUSTIFY) lb.setJustificationMode(Layout.JUSTIFICATION_MODE_INTER_WORD)
+            val layout = lb.build()
+            val before = b.before * spec.paraGap; val after = b.after * spec.paraGap
+            if (y > 0f) y += before
+            val h = layout.height.toFloat()
+            when {
+                y + h <= chh -> { draw(layout, 0, layout.lineCount); y += after }
+                h <= chh -> { newPage(); draw(layout, 0, layout.lineCount); y += after }
+                else -> {
+                    var line = 0
+                    while (line < layout.lineCount) {
+                        val top = layout.getLineTop(line)
+                        var end = line
+                        while (end < layout.lineCount && y + (layout.getLineBottom(end) - top) <= chh) end++
+                        if (end == line) { if (y > 0f) { newPage(); continue } else end = line + 1 }
+                        draw(layout, line, end); line = end
+                        if (line < layout.lineCount) newPage()
                     }
+                    y += after
                 }
             }
-            page?.let { doc.finishPage(it) }
-            out.outputStream().use { doc.writeTo(it) }
-        } finally { doc.close() }
+        }
+        page?.let { doc.finishPage(it) }
+        return added
     }
 
     fun rasterize(f: File, width: Int, maxPages: Int): List<Bitmap> {
@@ -225,21 +261,23 @@ object DocxWriter {
 
     private fun para(b: Block, spec: DocSpec): String {
         val sz = (spec.fontSize * b.scale * 2).toInt()
-        val rpr = "<w:rPr>" + (if (b.bold) "<w:b/><w:bCs/>" else "") + "<w:sz w:val=\"$sz\"/><w:szCs w:val=\"$sz\"/></w:rPr>"
-        val runs = b.text.split("\n").joinToString("<w:r><w:br/></w:r>") {
-            "<w:r>$rpr<w:t xml:space=\"preserve\">${esc(it)}</w:t></w:r>"
+        val runs = Inline.runs(b.text).joinToString("") { r ->
+            val rpr = "<w:rPr>" + (if (b.bold || r.bold) "<w:b/><w:bCs/>" else "") + (if (r.italic) "<w:i/><w:iCs/>" else "") +
+                "<w:sz w:val=\"$sz\"/><w:szCs w:val=\"$sz\"/></w:rPr>"
+            val parts = r.text.split("\n").joinToString("<w:br/>") { "<w:t xml:space=\"preserve\">${esc(it)}</w:t>" }
+            "<w:r>$rpr$parts</w:r>"
         }
         var ind = "<w:ind w:left=\"${(b.left * 20).toInt()}\""
         if (b.first < 0) ind += " w:hanging=\"${(-b.first * 20).toInt()}\"" else if (b.first > 0) ind += " w:firstLine=\"${(b.first * 20).toInt()}\""
         ind += "/>"
         val jc = when (b.align) { DocAlign.LEFT -> "left"; DocAlign.CENTER -> "center"; DocAlign.RIGHT -> "right"; DocAlign.JUSTIFY -> "both" }
         val line = (240 * spec.lineSpacing).toInt()
-        return "<w:p><w:pPr><w:keepLines/><w:spacing w:before=\"${(b.before * 20).toInt()}\" w:after=\"${(b.after * 20).toInt()}\" " +
+        return "<w:p><w:pPr><w:keepLines/><w:spacing w:before=\"${(b.before * spec.paraGap * 20).toInt()}\" w:after=\"${(b.after * spec.paraGap * 20).toInt()}\" " +
             "w:line=\"$line\" w:lineRule=\"auto\"/>$ind<w:jc w:val=\"$jc\"/></w:pPr>$runs</w:p>"
     }
 
     fun write(spec: DocSpec, out: File) {
-        val body = DocFormatter.blocks(spec).filter { it.text.isNotBlank() }.joinToString("") { para(it, spec) }
+        val body = DocFormatter.blocks(spec).filter { Inline.plain(it.text).isNotBlank() }.joinToString("") { para(it, spec) }
         val mg = spec.margin * 20
         val doc = "$HEAD<w:document $NS><w:body>$body<w:sectPr><w:pgSz w:w=\"${spec.page.wTw}\" w:h=\"${spec.page.hTw}\"/>" +
             "<w:pgMar w:top=\"$mg\" w:right=\"$mg\" w:bottom=\"$mg\" w:left=\"$mg\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"

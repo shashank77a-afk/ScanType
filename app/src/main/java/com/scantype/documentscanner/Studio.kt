@@ -45,11 +45,13 @@ fun StudioScreen(start: StudioInit, store: DocStore, snack: SnackbarHostState, s
     var spacing by remember { mutableStateOf(1.3f) }
     var page by remember { mutableStateOf(PageSize.A4) }
     var join by remember { mutableStateOf(true) }
+    var gap by remember { mutableStateOf(1f) }
+    var margin by remember { mutableIntStateOf(56) }
     var name by remember { mutableStateOf("Document_" + stamp()) }
     var working by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (start.template == DocTemplate.LETTER && text.isBlank()) text = LETTER_SKELETON }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Downloads on this Android version.") } }
-    val spec = DocSpec(text, template, align, size, spacing, page, join)
+    val spec = DocSpec(text, template, align, size, spacing, page, join, margin, gap)
 
     fun safe() = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { "Document" }
     fun tmp(ext: String): File = File(File(ctx.cacheDir, "exports").apply { mkdirs() }, safe() + "." + ext)
@@ -106,6 +108,14 @@ fun StudioScreen(start: StudioInit, store: DocStore, snack: SnackbarHostState, s
                     Text("Page size", style = MaterialTheme.typography.titleSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PageSize.values().forEach { p -> FilterChip(page == p, { page = p }, { Text(p.label) }) }
+                    }
+                    Text("Paragraph spacing", style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0.5f, 1f, 1.5f, 2f).forEach { g -> FilterChip(gap == g, { gap = g }, { Text("$g") }) }
+                    }
+                    Text("Margins", style = MaterialTheme.typography.titleSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(36 to "Narrow", 56 to "Normal", 72 to "Wide").forEach { (v, l) -> FilterChip(margin == v, { margin = v }, { Text(l) }) }
                     }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {

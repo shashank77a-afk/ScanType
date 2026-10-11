@@ -103,7 +103,8 @@ object Export {
             cr.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
         } else {
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ScanType").apply { mkdirs() }
-            val f = File(dir, "$display.$ext")
+            var f = File(dir, "$display.$ext"); var n = 1
+            while (f.exists()) f = File(dir, "${display}_${n++}.$ext")
             f.outputStream().use { bmp.compress(fmt, 95, it) }
             MediaScannerConnection.scanFile(ctx, arrayOf(f.path), arrayOf(mime), null)
         }

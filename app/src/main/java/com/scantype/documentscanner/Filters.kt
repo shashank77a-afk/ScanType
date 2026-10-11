@@ -116,15 +116,14 @@ object ImageFilters {
 }
 
 object IdCard {
-    /** Puts the cropped ID sides on one A4 page at about real size (for printing). */
-    fun combine(ctx: Context, uris: List<Uri>): Uri {
+    /** Puts the ID sides on one A4 page at about real size, ready to print. */
+    fun sheet(bitmaps: List<Bitmap>): Bitmap {
         val pw = 1240; val ph = 1754
         val page = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         val c = Canvas(page); c.drawColor(Color.WHITE)
         val border = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2f; color = Color.LTGRAY }
         var y = 220f
-        for (u in uris) {
-            val b = ImageFilters.load(ctx, u, 1600)
+        for (b in bitmaps) {
             val tw = 520f; val th = tw * b.height / b.width
             val left = (pw - tw) / 2
             c.drawBitmap(b, null, RectF(left, y, left + tw, y + th), Paint(Paint.FILTER_BITMAP_FLAG))
@@ -132,9 +131,6 @@ object IdCard {
             y += th + 120f
             b.recycle()
         }
-        val f = File(ctx.cacheDir, "id_${System.currentTimeMillis()}.jpg")
-        f.outputStream().use { page.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-        page.recycle()
-        return Uri.fromFile(f)
+        return page
     }
 }

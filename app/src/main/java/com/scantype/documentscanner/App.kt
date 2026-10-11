@@ -1,9 +1,6 @@
 package com.scantype.documentscanner
 
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -19,10 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -39,7 +34,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -56,14 +50,12 @@ enum class Mode { SCAN, HANDWRITING }
 
 class ToolItem(val icon: ImageVector, val label: String, val tint: Color, val onClick: () -> Unit)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun App() {
+fun App(prefs: Prefs) {
     val ctx = LocalContext.current
     val activity = ctx as ComponentActivity
     val scope = rememberCoroutineScope()
     val store = remember { DocStore(ctx) }
-    val prefs = remember { Prefs(ctx) }
     var tab by remember { mutableIntStateOf(0) }
     var docs by remember { mutableStateOf(store.list()) }
     var editor by remember { mutableStateOf<String?>(null) }
@@ -73,7 +65,14 @@ fun App() {
     var batch by remember { mutableStateOf(true) }
     var camMode by remember { mutableStateOf<CamMode?>(null) }
     var review by remember { mutableStateOf<ReviewState?>(null) }
+    var retakeIdx by remember { mutableStateOf<Int?>(null) }
+    var cropIdx by remember { mutableStateOf<Int?>(null) }
+    var idState by remember { mutableStateOf<IdState?>(null) }
+    var idSide by remember { mutableIntStateOf(0) }
+    var idCropUri by remember { mutableStateOf<Uri?>(null) }
+    var idCropRot by remember { mutableIntStateOf(0) }
     var toolStart by remember { mutableStateOf<Tool?>(null) }
+    var studio by remember { mutableStateOf<StudioInit?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
     var selecting by remember { mutableStateOf(false) }
@@ -81,17 +80,17 @@ fun App() {
     var deleteDialog by remember { mutableStateOf(false) }
     val sel = remember { mutableStateListOf<File>() }
     val snack = remember { SnackbarHostState() }
-    var cropIdx by remember { mutableStateOf<Int?>(null) }
-    var idQueue by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var idDone by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var studio by remember { mutableStateOf<StudioInit?>(null) }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Gallery on this Android version.") } }
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list(); sel.retainAll { it.exists() } }
 
     fun runOcr(uris: List<Uri>, handwriting: Boolean) {
+        if (!prefs.aiReady && !Langs.offline(prefs.lang)) {
+            toast("${Langs.label(prefs.lang)} needs AI recognition. Turn it on in Settings, or choose Hindi/English.")
+            return
+        }
         scope.launch {
-            val engine = if (prefs.aiReady) GeminiOcrEngine(prefs) else if (handwriting) Engines.handwriting else Engines.printed
+            val engine = pickEngine(prefs, handwriting)
             val out = StringBuilder(); var failed = 0; var unreadable = 0
             uris.forEachIndexed { i, u ->
                 busy = "Reading page ${i + 1} of ${uris.size}…"
@@ -155,6 +154,7 @@ fun App() {
             refresh(); tab = 0
         }
     }
+    val pickIdImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) idCropUri = u }
     val imageOnly = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
 
     fun openCam(m: CamMode) { if (m == CamMode.HAND && !prefs.aiReady) aiHint = true else camMode = m }
@@ -162,12 +162,24 @@ fun App() {
     fun onCaptured(uris: List<Uri>, m: CamMode) {
         camMode = null
         when (m) {
-            CamMode.DOCS -> { val rv = review; if (rv != null) rv.add(uris) else review = ReviewState(uris) }
             CamMode.TEXT -> runOcr(uris, false)
             CamMode.HAND -> runOcr(uris, true)
-            CamMode.ID ->
-                if (idQueue.isNotEmpty()) idQueue = idQueue + uris.take(1)          // back side added to the same card
-                else { idQueue = uris.take(2); idDone = emptyList() }              // front side (gallery may give both)
+            CamMode.QR -> {}
+            CamMode.ID -> { idCropRot = 0; idCropUri = uris.firstOrNull() }
+            CamMode.DOCS, CamMode.BOOK -> scope.launch {
+                busy = "Processing…"
+                val out = withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (m == CamMode.BOOK) uris.flatMap { EdgeDetect.splitBook(ctx, it) }
+                        else if (prefs.autoCrop) uris.map { EdgeDetect.autoCrop(ctx, it) } else uris
+                    }.getOrDefault(uris)
+                }
+                busy = null
+                val rv = review; val ri = retakeIdx; retakeIdx = null
+                if (rv != null && ri != null && ri < rv.pages.size) rv.replace(ri, out[0])
+                else if (rv != null) rv.add(out)
+                else review = ReviewState(out)
+            }
         }
     }
 
@@ -227,44 +239,29 @@ fun App() {
     val ed = editor
     if (ed != null) {
         BackHandler { editor = null }
-        EditorScreen(ed, editorIsHandwriting, store, { editor = null }, ::refresh, snack, scope) { s -> studio = StudioInit(s, DocTemplate.PLAIN) }
+        EditorScreen(ed, editorIsHandwriting, snack, scope, { editor = null }) { s -> studio = StudioInit(s, DocTemplate.PLAIN) }
         return
     }
     val cm = camMode
     if (cm != null) {
-        BackHandler { camMode = null; if (review?.pages?.isEmpty() == true) review = null }
-        CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs.aiReady,
+        BackHandler { camMode = null; retakeIdx = null; if (review?.pages?.isEmpty() == true) review = null }
+        CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs,
+            if (cm == CamMode.ID) (if (idSide == 0) "ID Card: scan the FRONT side" else "ID Card: scan the BACK side") else null,
             { uris, m -> onCaptured(uris, m) },
-            { camMode = null; if (review?.pages?.isEmpty() == true) review = null },
-            { camMode = null; startScan(Mode.SCAN) },
-            idBack = idQueue.isNotEmpty())
+            { camMode = null; retakeIdx = null; if (review?.pages?.isEmpty() == true) review = null },
+            { camMode = null; startScan(Mode.SCAN) })
         return
     }
-    if (idQueue.isNotEmpty()) {
-        val k = idDone.size
-        fun idReset() { idQueue = emptyList(); idDone = emptyList() }
-        BackHandler { idReset() }
-        if (k < idQueue.size) {
-            CropScreen(idQueue[k], 0, if (k == 0) "Crop the FRONT side" else "Crop the BACK side",
-                onDone = { u -> idDone = idDone + u }, onCancel = { idReset() })
-        } else {
-            // Every captured side is cropped: show both and let the user scan the back or finish.
-            IdSidesScreen(idDone,
-                onScanBack = { camMode = CamMode.ID },
-                onPdf = { val d = idDone; idReset(); review = ReviewState(d) },
-                onPrint = {
-                    val d = idDone
-                    scope.launch {
-                        busy = "Preparing A4 print page…"
-                        val res = withContext(Dispatchers.IO) { runCatching { IdCard.combine(ctx, d) }.getOrNull() }
-                        busy = null
-                        if (res != null) { idReset(); review = ReviewState(listOf(res)) }
-                        else toast("Could not prepare the ID card page. Please try again.")
-                    }
-                },
-                onCancel = { idReset() })
-            busy?.let { BusyDialog(it) }
-        }
+    val ids = idState
+    val ic = idCropUri
+    if (ids != null && ic != null) {
+        BackHandler { idCropUri = null }
+        CropScreen(ic, idCropRot, if (idSide == 0) "Crop the FRONT side" else "Crop the BACK side",
+            onDone = { u ->
+                if (idSide == 0) { ids.front = u; ids.fr = 0 } else { ids.back = u; ids.br = 0 }
+                idCropUri = null
+            },
+            onCancel = { idCropUri = null })
         return
     }
     val rv = review
@@ -276,14 +273,28 @@ fun App() {
             onCancel = { cropIdx = null })
         return
     }
+    if (ids != null) {
+        BackHandler { idState = null }
+        IdCardScreen(ids, store, snack, scope,
+            onBack = { idState = null },
+            onScan = { side -> idSide = side; idCropRot = 0; openCam(CamMode.ID) },
+            onGallery = { side -> idSide = side; idCropRot = 0; pickIdImage.launch(imageOnly) },
+            onCrop = { side ->
+                idSide = side
+                idCropRot = if (side == 0) ids.fr else ids.br
+                idCropUri = if (side == 0) ids.front else ids.back
+            },
+            onSaved = { idState = null; refresh(); tab = 0; toast("Saved to Documents") })
+        return
+    }
     if (rv != null) {
         BackHandler { review = null }
-        ScanReviewScreen(rv, store, snack, scope,
+        ScanReviewScreen(rv, store, prefs, snack, scope,
             onBack = { review = null },
             onSaved = { review = null; refresh(); tab = 0; toast("Saved to Documents") },
             onExtract = { runOcr(rv.pages.toList(), false) },
-            onAdd = { camMode = CamMode.DOCS },
-            onRetake = { i -> rv.remove(i); camMode = CamMode.DOCS },
+            onAddCamera = { retakeIdx = null; camMode = CamMode.DOCS },
+            onRetake = { i -> retakeIdx = i; camMode = CamMode.DOCS },
             onCrop = { i -> cropIdx = i })
         busy?.let { BusyDialog(it) }
         return
@@ -292,10 +303,12 @@ fun App() {
     val sections = listOf(
         "Scan" to listOf(
             ToolItem(Icons.Filled.DocumentScanner, "Scan Docs", Blue) { openCam(CamMode.DOCS) },
-            ToolItem(Icons.Filled.Description, "ID Card", Color(0xFF00897B)) { openCam(CamMode.ID) },
+            ToolItem(Icons.Filled.Description, "ID Card", Color(0xFF00897B)) { idState = IdState() },
+            ToolItem(Icons.Filled.Layers, "Book", Color(0xFF2E7D32)) { openCam(CamMode.BOOK) },
+            ToolItem(Icons.Filled.Apps, "QR Code", Color(0xFF00695C)) { openCam(CamMode.QR) },
             ToolItem(Icons.Filled.TextFields, "To Text", Color(0xFF2E7D32)) { openCam(CamMode.TEXT) },
             ToolItem(Icons.Filled.Edit, "Handwriting", Blue) { openCam(CamMode.HAND) },
-            ToolItem(Icons.Filled.Crop, "Auto-crop", Color(0xFF00695C)) { startScan(Mode.SCAN) }),
+            ToolItem(Icons.Filled.Crop, "Google scanner", Color(0xFF00695C)) { startScan(Mode.SCAN) }),
         "Create" to listOf(
             ToolItem(Icons.Filled.Edit, "Text to PDF / Word", Blue) { studio = StudioInit("", DocTemplate.PLAIN) },
             ToolItem(Icons.Filled.Description, "Official Letter", Color(0xFF00897B)) { studio = StudioInit("", DocTemplate.LETTER) }),
@@ -536,7 +549,7 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
                 Text(f.nameWithoutExtension, maxLines = 2, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(DateFormat.getDateInstance().format(Date(f.lastModified())), style = MaterialTheme.typography.bodySmall)
-                Text("$pages pages · ${sizeText(f.length())}", style = MaterialTheme.typography.bodySmall)
+                Text("PDF · $pages pages · ${sizeText(f.length())}", style = MaterialTheme.typography.bodySmall)
             }
             if (selecting) Checkbox(selected, null)
             else Box {
@@ -582,114 +595,4 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
         text = { Text("This can't be undone.") },
         confirmButton = { TextButton({ store.delete(f); deleting = false; refresh() }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton({ deleting = false }) { Text("Cancel") } })
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsPage(prefs: Prefs, close: () -> Unit) {
-    Scaffold(topBar = {
-        TopAppBar({ Text("Settings") }, navigationIcon = { IconButton(close) { Icon(Icons.Filled.ArrowBack, "Back") } })
-    }) { pad -> Box(Modifier.padding(pad)) { SettingsScreen(prefs) } }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditorScreen(initial: String, handwriting: Boolean, store: DocStore, close: () -> Unit, refresh: () -> Unit,
-                 snack: SnackbarHostState, scope: kotlinx.coroutines.CoroutineScope, onCreate: (String) -> Unit) {
-    val ctx = LocalContext.current
-    var text by remember { mutableStateOf(initial) }
-    Scaffold(
-        topBar = { TopAppBar({ Text("Recognized Text") }, navigationIcon = { IconButton(close) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
-        snackbarHost = { SnackbarHost(snack) }
-    ) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp)) {
-            if (handwriting) Text("Handwriting recognition can make mistakes. Please review and correct the text.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            if (text.contains("[?]")) Text("Words marked [?] are unclear. Please check them, or rescan in better light.",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({
-                    (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("text", text))
-                    scope.launch { snack.showSnackbar("Copied") }
-                }) { Text("Copy") }
-                OutlinedButton({
-                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null))
-                }) { Text("Share") }
-                Button({ onCreate(text) }) { Text("Create PDF") }
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingsScreen(prefs: Prefs) {
-    var useAi by remember { mutableStateOf(prefs.useAi) }
-    var key by remember { mutableStateOf(prefs.apiKey) }
-    var model by remember { mutableStateOf(prefs.model) }
-    var confirm by remember { mutableStateOf(false) }
-    Column(Modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Settings", style = MaterialTheme.typography.headlineSmall)
-        Card(shape = RoundedCornerShape(20.dp)) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("AI text recognition (Google Gemini)", style = MaterialTheme.typography.titleSmall)
-                        Text("Much better Hindi handwriting and printed text. Needs internet and your own API key.",
-                            style = MaterialTheme.typography.bodySmall)
-                    }
-                    Switch(useAi, { on -> if (on) confirm = true else { useAi = false; prefs.useAi = false } })
-                }
-                if (useAi) {
-                    OutlinedTextField(key, { key = it; prefs.apiKey = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Gemini API key") }, visualTransformation = PasswordVisualTransformation())
-                    OutlinedTextField(model, { model = it; prefs.model = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Model") })
-                    Text("Get a key at aistudio.google.com. When ON, the page images you choose for text recognition are sent to Google.",
-                        style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        Text("Privacy", style = MaterialTheme.typography.titleMedium)
-        Text("Your documents are stored privately on this device. Scanning, filters, PDF tools and on-device text recognition work offline. Nothing is uploaded unless you turn on AI recognition above.")
-        Text("Theme follows your device's Light/Dark setting.")
-        Text("ScanType 1.1.0", style = MaterialTheme.typography.bodySmall)
-    }
-    if (confirm) AlertDialog({ confirm = false }, title = { Text("Send images to Google?") },
-        text = { Text("With AI recognition ON, the pages you choose for Image to Text or Handwriting to Text are sent over the internet to Google's Gemini service, using your API key. Nothing is sent when it is OFF. Depending on your key type, Google's terms decide how the data is used, so avoid sensitive documents on a free key.") },
-        confirmButton = { TextButton({ useAi = true; prefs.useAi = true; prefs.consented = true; confirm = false }) { Text("I agree") } },
-        dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
-}
-
-/** Shows the cropped ID sides. With only the front done, offers "Scan Back Side"; "Finish" works with one or two sides. */
-@Composable
-fun IdSidesScreen(sides: List<Uri>, onScanBack: () -> Unit, onPdf: () -> Unit, onPrint: () -> Unit, onCancel: () -> Unit) {
-    val ctx = LocalContext.current
-    Scaffold { pad ->
-        Column(Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Back") }
-                Text("ID card", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            }
-            sides.forEachIndexed { i, u ->
-                val bmp by produceState<Bitmap?>(null, u) {
-                    value = withContext(Dispatchers.Default) { runCatching { ImageFilters.load(ctx, u, 700) }.getOrNull() }
-                }
-                Text(if (i == 0) "Front side" else "Back side", style = MaterialTheme.typography.titleSmall)
-                Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center) {
-                    val b = bmp
-                    if (b != null) Image(b.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                    else CircularProgressIndicator()
-                }
-            }
-            if (sides.size == 1) {
-                Button(onScanBack, Modifier.fillMaxWidth()) { Text("Scan Back Side") }
-                OutlinedButton(onPdf, Modifier.fillMaxWidth()) { Text("Finish (front only)") }
-            } else Button(onPdf, Modifier.fillMaxWidth()) { Text("Finish (PDF, edit, save as images)") }
-            OutlinedButton(onPrint, Modifier.fillMaxWidth()) { Text("A4 print layout (front + back on one page)") }
-            Text("After Finish you can crop, rotate and adjust each side, save one PDF, or save the sides as separate images.",
-                style = MaterialTheme.typography.bodySmall)
-        }
-    }
 }

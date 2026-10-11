@@ -2,12 +2,15 @@ package com.scantype.documentscanner
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,60 +44,78 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Pages being edited, each with its own filter and rotation. */
+/** Pages of one document, each with its original image, filter and rotation. */
 class ReviewState(initial: List<Uri>) {
     val pages = mutableStateListOf<Uri>().apply { addAll(initial) }
+    val origs = mutableStateListOf<Uri>().apply { addAll(initial) }
     val filters = mutableStateListOf<PageFilter>().apply { repeat(initial.size) { add(PageFilter.ENHANCE) } }
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
     var title by mutableStateOf("Scan_" + stamp())
     fun add(u: List<Uri>) {
-        u.forEach { pages.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0) }
+        u.forEach { pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0) }
     }
-    fun remove(i: Int) { pages.removeAt(i); filters.removeAt(i); rots.removeAt(i) }
-    /** Moves page [a] to position [b] (keeps its filter and rotation). */
-    fun move(a: Int, b: Int) {
-        if (a !in pages.indices || b !in pages.indices || a == b) return
-        pages.add(b, pages.removeAt(a)); filters.add(b, filters.removeAt(a)); rots.add(b, rots.removeAt(a))
-    }
-}
-
-@Composable
-private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, n: Int, onClick: () -> Unit) {
-    val ctx = LocalContext.current
-    val bmp by produceState<Bitmap?>(null, uri, rot) {
-        value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
-    }
-    Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF164532))
-        .then(if (selected) Modifier.border(2.dp, Cyan, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
-        bmp?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-        Text("$n", color = Color.White, fontSize = 11.sp,
-            modifier = Modifier.align(Alignment.BottomEnd).background(Color(0x99000000)).padding(horizontal = 4.dp))
+    fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
+    fun remove(i: Int) { pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i) }
+    fun move(i: Int, d: Int) {
+        val j = i + d
+        if (j < 0 || j >= pages.size) return
+        val p = pages[i]; pages[i] = pages[j]; pages[j] = p
+        val o = origs[i]; origs[i] = origs[j]; origs[j] = o
+        val f = filters[i]; filters[i] = filters[j]; filters[j] = f
+        val r = rots[i]; rots[i] = rots[j]; rots[j] = r
     }
 }
 
 @Composable
 private fun BarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Column(Modifier.clickable { onClick() }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(Modifier.clickable { onClick() }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, label, tint = Color.White)
         Text(label, color = Color.White, fontSize = 11.sp)
     }
 }
 
 @Composable
-fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, scope: CoroutineScope,
-                     onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAdd: () -> Unit,
+private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onClick: () -> Unit) {
+    val ctx = LocalContext.current
+    val bmp by produceState<Bitmap?>(null, uri, rot) {
+        value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
+    }
+    Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF164532))
+        .then(if (selected) Modifier.border(3.dp, Cyan, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
+        bmp?.let { Image(it.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        Text(label, color = Color.White, fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomStart).background(Color(0x99000000)).padding(horizontal = 4.dp))
+    }
+}
+
+@Composable
+fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
+                     onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAddCamera: () -> Unit,
                      onRetake: (Int) -> Unit, onCrop: (Int) -> Unit) {
     val ctx = LocalContext.current
     if (r.pages.isEmpty()) { LaunchedEffect(Unit) { onBack() }; return }
     var idx by remember { mutableIntStateOf(0) }
     var applyAll by remember { mutableStateOf(true) }
     var saving by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf("") }
     var gDialog by remember { mutableStateOf(false) }
     var gPng by remember { mutableStateOf(false) }
     var gAll by remember { mutableStateOf(true) }
+    var fDialog by remember { mutableStateOf(false) }
+    var fMode by remember { mutableIntStateOf(0) }
+    var addMenu by remember { mutableStateOf(false) }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save images on this Android version.") } }
     val cur = idx.coerceIn(0, r.pages.size - 1)
     val page = r.pages[cur]; val flt = r.filters[cur]; val rot = r.rots[cur]
+
+    fun addProcessed(us: List<Uri>) {
+        scope.launch {
+            saving = true
+            val p = withContext(Dispatchers.IO) { us.map { if (prefs.autoCrop) runCatching { EdgeDetect.autoCrop(ctx, it) }.getOrDefault(it) else it } }
+            r.add(p); idx = r.pages.size - 1; saving = false
+        }
+    }
+    val pickG = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us -> if (us.isNotEmpty()) addProcessed(us) }
+    val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
     val preview by produceState<Bitmap?>(null, page, flt, rot) {
         value = null
@@ -111,19 +132,28 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
             }.getOrDefault(emptyMap())
         }
     }
+    val warn by produceState<String?>(null, page) {
+        value = withContext(Dispatchers.Default) {
+            runCatching { val b = ImageFilters.load(ctx, page, 500); val m = EdgeDetect.quality(b); b.recycle(); m }.getOrNull()
+        }
+    }
 
-    fun save() {
-        val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList(); val name = r.title
+    fun finish() {
+        val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList(); val name = r.title; val mode = fMode
         scope.launch {
             saving = true
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
-                    store.bitmapsToPdf(pages.size, name) { i ->
-                        ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i])
+                    fun bmp(i: Int) = ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i])
+                    when (mode) {
+                        0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
+                        1 -> PdfBuilders.searchable(store.newFileExt(name, "pdf"), pages.size) { bmp(it) }
+                        else -> PdfBuilders.originalPlusTyped(ctx, store.newFileExt(name, "pdf"), pages.size, pickEngine(prefs, false),
+                            mode == 2, { bmp(it) }) { p -> progress = "Reading page $p of ${pages.size}…" }
                     }
                 }.isSuccess
             }
-            saving = false
+            saving = false; progress = ""
             if (ok) onSaved() else snack.showSnackbar("PDF creation failed. Please try again.")
         }
     }
@@ -160,8 +190,14 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
                     .background(Color(0x22FFFFFF)).padding(horizontal = 12.dp, vertical = 10.dp),
                     textStyle = TextStyle(color = Color.White, fontSize = 17.sp), singleLine = true, cursorBrush = SolidColor(Cyan))
                 Spacer(Modifier.width(8.dp))
-                Button({ save() }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy)) {
-                    Text(if (saving) "Saving…" else "Done")
+                Button({ fDialog = true }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy)) {
+                    Text(if (saving) "Working…" else "Finish")
+                }
+            }
+            warn?.let { w ->
+                Row(Modifier.fillMaxWidth().background(Color(0x33FFC107)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(w, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    TextButton({ onRetake(cur) }) { Text("Retake", color = Cyan) }
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
@@ -173,47 +209,49 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton({ if (cur > 0) idx = cur - 1 }) { Icon(Icons.Filled.ArrowBack, "Previous page", tint = Color.White) }
-                Text("${cur + 1} / ${r.pages.size}", color = Color.White)
-                IconButton({ if (cur < r.pages.size - 1) idx = cur + 1 }) { Icon(Icons.Filled.ArrowForward, "Next page", tint = Color.White) }
+                TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = Cyan) }
                 Spacer(Modifier.weight(1f))
-                Text("Apply to all pages", color = Color.White, fontSize = 13.sp)
-                Spacer(Modifier.width(6.dp))
+                Text("Page ${cur + 1} of ${r.pages.size}", color = Color.White)
+                Spacer(Modifier.weight(1f))
+                TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = Cyan) }
+            }
+            LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Same filter for all pages", color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Switch(applyAll, { applyAll = it })
             }
-            if (r.pages.size > 1) {
-                LazyRow(Modifier.padding(top = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(r.pages.indices.toList()) { i -> PageThumb(r.pages[i], r.rots[i], i == cur, i + 1) { idx = i } }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    val tc = ButtonDefaults.textButtonColors(contentColor = Cyan, disabledContentColor = Color(0x66FFFFFF))
-                    TextButton({ r.move(cur, cur - 1); idx = cur - 1 }, enabled = cur > 0, colors = tc) { Text("◀ Move earlier") }
-                    TextButton({ r.move(cur, cur + 1); idx = cur + 1 }, enabled = cur < r.pages.size - 1, colors = tc) { Text("Move later ▶") }
-                }
-            }
-            LazyRow(Modifier.padding(vertical = 8.dp), contentPadding = PaddingValues(horizontal = 12.dp),
+            LazyRow(Modifier.padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(PageFilter.values().toList()) { f ->
                     val sel = f == flt
                     Column(Modifier.clickable {
                         if (applyAll) { for (i in r.filters.indices) r.filters[i] = f } else r.filters[cur] = f
                     }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(80.dp, 104.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
+                        Box(Modifier.size(64.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
                             .then(if (sel) Modifier.border(3.dp, Cyan, RoundedCornerShape(10.dp)) else Modifier)) {
                             thumbs[f]?.let { Image(it.asImageBitmap(), f.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                         }
-                        Text(f.label, color = if (sel) Cyan else Color.White, fontSize = 12.sp)
+                        Text(f.label, color = if (sel) Cyan else Color.White, fontSize = 11.sp)
                     }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
-                BarButton(Icons.Filled.Add, "Add") { onAdd() }
+                Box {
+                    BarButton(Icons.Filled.Add, "Add") { addMenu = true }
+                    DropdownMenu(addMenu, { addMenu = false }) {
+                        DropdownMenuItem({ Text("Camera") }, { addMenu = false; onAddCamera() })
+                        DropdownMenuItem({ Text("Gallery") }, { addMenu = false; pickG.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                        DropdownMenuItem({ Text("Files") }, { addMenu = false; pickF.launch(arrayOf("image/*")) })
+                    }
+                }
                 BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
                 BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
+                BarButton(Icons.Filled.Image, "Original") { r.pages[cur] = r.origs[cur]; r.rots[cur] = 0 }
                 BarButton(Icons.Filled.TextFields, "Text") { onExtract() }
-                BarButton(Icons.Filled.Image, "Gallery") { gDialog = true }
+                BarButton(Icons.Filled.Image, "Images") { gDialog = true }
             }
         }
     }
@@ -233,4 +271,26 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, snack: SnackbarHostState, 
         },
         confirmButton = { TextButton({ gDialog = false; gate { saveToGallery() } }) { Text("Save") } },
         dismissButton = { TextButton({ gDialog = false }) { Text("Cancel") } })
+    if (fDialog) AlertDialog({ fDialog = false }, title = { Text("Finish document") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "PDF of the scanned pages",
+                    "Searchable PDF (hidden text layer, offline)",
+                    "Original + typed text, page by page",
+                    "Original pages, then typed text section"
+                ).forEachIndexed { i, l ->
+                    Row(Modifier.fillMaxWidth().clickable { fMode = i }, verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(fMode == i, { fMode = i }); Text(l)
+                    }
+                }
+                if (fMode >= 2) Text("The text is read from each page now, using " + (if (prefs.aiReady) "AI recognition." else "on-device recognition (weak on handwriting)."),
+                    style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { TextButton({ fDialog = false; finish() }) { Text("Save PDF") } },
+        dismissButton = { TextButton({ fDialog = false }) { Text("Cancel") } })
+    if (progress.isNotEmpty()) AlertDialog({}, confirmButton = {}, text = {
+        Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(progress) }
+    })
 }
