@@ -79,10 +79,12 @@ fun needsLogin(e: Throwable) = e is AiException && e.code in setOf("login_requir
 
 /** Client for the ScanType Cloudflare Worker. The Gemini key lives only on that server. */
 object Backend {
+    // Default deployed ScanType backend. The Account screen can still override this URL.
+    private const val DEFAULT_BASE_URL = "https://scantype-api.scantype.workers.dev"
+
     private suspend fun call(prefs: Prefs, method: String, path: String, body: JSONObject?, auth: Boolean): JSONObject =
         withContext(Dispatchers.IO) {
-            val base = prefs.backendUrl.trim().trimEnd('/')
-            if (base.isEmpty()) throw AiException("no_backend", "The AI server is not set up.")
+            val base = prefs.backendUrl.trim().trimEnd('/').ifBlank { DEFAULT_BASE_URL }
             if (!base.startsWith("https://")) throw AiException("bad_backend", "The server address must start with https://")
             val c = URL(base + path).openConnection() as HttpURLConnection
             try {

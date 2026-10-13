@@ -25,6 +25,8 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
+private const val DEFAULT_SCANTYPE_BACKEND_URL = "https://scantype-api.scantype.workers.dev"
+
 /** Google Sign-In with the official Credential Manager API. Only the ID token is used, and the server verifies it. */
 object GoogleAuth {
     suspend fun idToken(activity: Activity, webClientId: String): String {
@@ -52,7 +54,12 @@ object GoogleAuth {
 fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, close: () -> Unit) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
-    var url by remember { mutableStateOf(prefs.backendUrl) }
+    var url by remember { mutableStateOf(prefs.backendUrl.ifBlank { DEFAULT_SCANTYPE_BACKEND_URL }) }
+    LaunchedEffect(prefs) {
+        if (prefs.backendUrl.isBlank()) {
+            prefs.backendUrl = DEFAULT_SCANTYPE_BACKEND_URL
+        }
+    }
     var cid by remember { mutableStateOf(prefs.googleClientId) }
     var working by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
