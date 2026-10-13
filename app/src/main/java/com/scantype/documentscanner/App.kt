@@ -75,6 +75,11 @@ fun App(prefs: Prefs) {
     var studio by remember { mutableStateOf<StudioInit?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
+    var showAccount by remember { mutableStateOf(false) }
+    var letter by remember { mutableStateOf<LetterState?>(null) }
+    var letterTarget by remember { mutableStateOf(false) }
+    var letterCropIdx by remember { mutableStateOf<Int?>(null) }
+    var aiFail by remember { mutableStateOf<AiFail?>(null) }
     var selecting by remember { mutableStateOf(false) }
     var moveDialog by remember { mutableStateOf(false) }
     var deleteDialog by remember { mutableStateOf(false) }
@@ -84,26 +89,30 @@ fun App(prefs: Prefs) {
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list(); sel.retainAll { it.exists() } }
 
-    fun runOcr(uris: List<Uri>, handwriting: Boolean) {
-        if (!prefs.aiReady && !Langs.offline(prefs.lang)) {
+    fun runOcr(uris: List<Uri>, handwriting: Boolean, forceOffline: Boolean = false) {
+        val useAi = prefs.aiReady && !forceOffline
+        if (!useAi && !Langs.offline(prefs.lang)) {
             toast("${Langs.label(prefs.lang)} needs AI recognition. Turn it on in Settings, or choose Hindi/English.")
             return
         }
         scope.launch {
-            val engine = pickEngine(prefs, handwriting)
+            val engine = if (useAi) pickEngine(prefs, handwriting) else if (handwriting) Engines.handwriting else Engines.printed
             val out = StringBuilder(); var failed = 0; var unreadable = 0
+            var lastErr: Throwable? = null
             uris.forEachIndexed { i, u ->
                 busy = "Reading page ${i + 1} of ${uris.size}…"
                 engine.recognize(ctx, u)
                     .onSuccess { if (it.trim() == "UNREADABLE") unreadable++ else out.append(it.trim()).append("\n\n") }
-                    .onFailure { failed++ }
+                    .onFailure { failed++; lastErr = it }
             }
             busy = null
-            if (out.isBlank()) toast(
-                if (unreadable > 0) "The text is not clear enough. Please rescan closer, in focus and in better light."
-                else if (prefs.aiReady) "AI recognition failed. Check your internet connection and API key in Settings."
-                else "We couldn't recognize this page. Please try again with better lighting.")
-            else {
+            if (out.isBlank()) {
+                val e = lastErr
+                if (e != null && useAi) aiFail = AiFail(aiMessage(e), (e as? AiException)?.code ?: "", uris, handwriting)
+                else toast(
+                    if (unreadable > 0) "The text is not clear enough. Please rescan closer, in focus and in better light."
+                    else "We couldn't recognize this page. Please try again with better lighting.")
+            } else {
                 editorIsHandwriting = handwriting; editor = out.toString().trim()
                 if (failed + unreadable > 0) toast("Some pages could not be read. You can rescan them.")
                 else if (Regex("\\[\\?\\]").findAll(out).count() >= 3) toast("Some words are unclear and marked [?]. Review them, or rescan in better light.")
@@ -175,6 +184,12 @@ fun App(prefs: Prefs) {
                     }.getOrDefault(uris)
                 }
                 busy = null
+                val lt = letter
+                if (letterTarget && lt != null) {
+                    letterTarget = false
+                    lt.images.addAll(out); lt.origs.addAll(if (out.size == uris.size) uris else out)
+                    return@launch
+                }
                 val rv = review; val ri = retakeIdx; retakeIdx = null
                 if (rv != null && ri != null && ri < rv.pages.size) rv.replace(ri, out[0])
                 else if (rv != null) rv.add(out)
@@ -218,6 +233,24 @@ fun App(prefs: Prefs) {
         }
     }
 
+    aiFail?.let { f ->
+        AlertDialog({ aiFail = null }, title = { Text("AI recognition") }, text = { Text(f.message) },
+            confirmButton = {
+                if (needsLogin(AiException(f.code, ""))) TextButton({ aiFail = null; showAccount = true }) { Text("Sign in") }
+                else TextButton({ aiFail = null; runOcr(f.uris, f.handwriting) }) { Text("Retry") }
+            },
+            dismissButton = {
+                Row {
+                    TextButton({ aiFail = null; runOcr(f.uris, f.handwriting, true) }) { Text("Use offline") }
+                    TextButton({ aiFail = null }) { Text("Cancel") }
+                }
+            })
+    }
+    if (showAccount) {
+        BackHandler { showAccount = false }
+        AccountScreen(prefs, snack, scope) { showAccount = false }
+        return
+    }
     val ts = toolStart
     if (ts != null) {
         BackHandler { toolStart = null }
@@ -226,7 +259,7 @@ fun App(prefs: Prefs) {
     }
     if (showSettings) {
         BackHandler { showSettings = false }
-        SettingsPage(prefs) { showSettings = false }
+        SettingsPage(prefs, { showAccount = true }) { showSettings = false }
         return
     }
     val st = studio
@@ -244,11 +277,11 @@ fun App(prefs: Prefs) {
     }
     val cm = camMode
     if (cm != null) {
-        BackHandler { camMode = null; retakeIdx = null; if (review?.pages?.isEmpty() == true) review = null }
+        BackHandler { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null }
         CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs,
             if (cm == CamMode.ID) (if (idSide == 0) "ID Card: scan the FRONT side" else "ID Card: scan the BACK side") else null,
             { uris, m -> onCaptured(uris, m) },
-            { camMode = null; retakeIdx = null; if (review?.pages?.isEmpty() == true) review = null },
+            { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null },
             { camMode = null; startScan(Mode.SCAN) })
         return
     }
@@ -262,6 +295,26 @@ fun App(prefs: Prefs) {
                 idCropUri = null
             },
             onCancel = { idCropUri = null })
+        return
+    }
+    val lt = letter
+    val lci = letterCropIdx
+    if (lt != null && lci != null && lci < lt.images.size) {
+        BackHandler { letterCropIdx = null }
+        CropScreen(lt.images[lci], 0, "Crop the letter",
+            onDone = { u -> lt.images[lci] = u; letterCropIdx = null },
+            onCancel = { letterCropIdx = null })
+        return
+    }
+    if (lt != null) {
+        BackHandler { letter = null }
+        LetterScreen(lt, store, prefs, snack, scope,
+            onBack = { letter = null },
+            onAddCamera = { letterTarget = true; camMode = CamMode.DOCS },
+            onCrop = { i -> letterCropIdx = i },
+            onAccount = { showAccount = true },
+            onSaved = { letter = null; refresh(); tab = 0; toast("Saved to Documents") })
+        busy?.let { BusyDialog(it) }
         return
     }
     val rv = review
@@ -311,7 +364,8 @@ fun App(prefs: Prefs) {
             ToolItem(Icons.Filled.Crop, "Google scanner", Color(0xFF00695C)) { startScan(Mode.SCAN) }),
         "Create" to listOf(
             ToolItem(Icons.Filled.Edit, "Text to PDF / Word", Blue) { studio = StudioInit("", DocTemplate.PLAIN) },
-            ToolItem(Icons.Filled.Description, "Official Letter", Color(0xFF00897B)) { studio = StudioInit("", DocTemplate.LETTER) }),
+            ToolItem(Icons.Filled.Description, "Official Letter", Color(0xFF00897B)) { studio = StudioInit("", DocTemplate.LETTER) },
+            ToolItem(Icons.Filled.Edit, "Handwritten letter to PDF", Color(0xFF2E7D32)) { letter = LetterState() }),
         "Convert" to listOf(
             ToolItem(Icons.Filled.PictureAsPdf, "Image to PDF", Color(0xFFE53935)) { pickImages.launch(imageOnly) },
             ToolItem(Icons.Filled.Image, "Select Image to Text", Color(0xFF2E7D32)) { pickImage.launch(imageOnly) },
@@ -333,7 +387,7 @@ fun App(prefs: Prefs) {
             when (tab) {
                 0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
-                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) })
+                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true })
                 else -> ToolsScreen(sections)
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
@@ -428,7 +482,7 @@ fun ToolTile(t: ToolItem, modifier: Modifier) {
 @Composable
 fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
                selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
-               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit) {
+               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit, onAccount: () -> Unit) {
     var q by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
@@ -448,6 +502,7 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                 Text("ScanType", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
                 IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
+                IconButton(onAccount) { Icon(Icons.Filled.AccountCircle, "Account") }
                 IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
             }
         }

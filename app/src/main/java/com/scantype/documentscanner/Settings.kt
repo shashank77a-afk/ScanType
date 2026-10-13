@@ -31,7 +31,7 @@ private fun Setting(title: String, sub: String, checked: Boolean, onChange: (Boo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsPage(prefs: Prefs, close: () -> Unit) {
+fun SettingsPage(prefs: Prefs, onAccount: () -> Unit, close: () -> Unit) {
     val ctx = LocalContext.current
     var useAi by remember { mutableStateOf(prefs.useAi) }
     var key by remember { mutableStateOf(prefs.apiKey) }
@@ -51,16 +51,25 @@ fun SettingsPage(prefs: Prefs, close: () -> Unit) {
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Card(shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Account", style = MaterialTheme.typography.titleSmall)
+                    Text(if (prefs.signedIn) "Signed in as ${prefs.userEmail}" else "Not signed in. Scanning, PDF and Word work without an account.",
+                        style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onAccount) { Text("Account & AI server") }
+                }
+            }
+            Card(shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Setting("AI text recognition (Google Gemini)",
-                        "Much better Hindi handwriting and printed text. Needs internet and your own API key.", useAi) { on ->
+                        if (prefs.aiViaBackend) "Much better Hindi handwriting. Needs internet and a Google sign-in. Images go to your ScanType server."
+                        else "Much better Hindi handwriting. Needs internet and a server address (Account) or a developer key.", useAi) { on ->
                         if (on) confirm = true else { useAi = false; prefs.useAi = false }
                     }
-                    if (useAi) {
+                    if (useAi && !prefs.aiViaBackend) {
+                        Text("Developer mode (personal key). Set a server address in Account to use the server instead.", style = MaterialTheme.typography.bodySmall)
                         OutlinedTextField(key, { key = it; prefs.apiKey = it }, Modifier.fillMaxWidth(), singleLine = true,
                             label = { Text("Gemini API key") }, visualTransformation = PasswordVisualTransformation())
                         OutlinedTextField(model, { model = it; prefs.model = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Model") })
-                        Text("Get a key at aistudio.google.com. When ON, the page images you choose for text recognition are sent to Google.",
-                            style = MaterialTheme.typography.bodySmall)
+                        Text("When ON, the page images you choose for text recognition are sent to Google.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -109,12 +118,12 @@ fun SettingsPage(prefs: Prefs, close: () -> Unit) {
             }
             Text("Privacy", style = MaterialTheme.typography.titleMedium)
             Text("Your documents are stored privately on this device. Scanning, filters, PDF tools and on-device text recognition work offline. Nothing is uploaded unless you turn on AI recognition above.")
-            Text("ScanType 1.4.0", style = MaterialTheme.typography.bodySmall)
+            Text("ScanType 1.5.0", style = MaterialTheme.typography.bodySmall)
         }
     }
 
     if (confirm) AlertDialog({ confirm = false }, title = { Text("Send images to Google?") },
-        text = { Text("With AI recognition ON, the pages you choose for text recognition are sent over the internet to Google's Gemini service, using your API key. Nothing is sent when it is OFF. Depending on your key type, Google's terms decide how the data is used, so avoid sensitive documents on a free key.") },
+        text = { Text(if (prefs.aiViaBackend) "With AI recognition ON, the pages you choose for text recognition are sent over HTTPS to your ScanType server, which forwards them to Google Gemini and returns the text. The server does not store your documents. Nothing is sent when it is OFF. Avoid sensitive documents such as Aadhaar or bank papers." else "With AI recognition ON, the pages you choose are sent to Google's Gemini service using your developer key. Nothing is sent when it is OFF. Avoid sensitive documents.") },
         confirmButton = { TextButton({ useAi = true; prefs.useAi = true; prefs.consented = true; confirm = false }) { Text("I agree") } },
         dismissButton = { TextButton({ confirm = false }) { Text("Cancel") } })
 
