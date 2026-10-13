@@ -21,6 +21,10 @@ android {
         targetSdk = 35
         versionCode = 5
         versionName = "1.4.0"
+
+        // Default server and OAuth Web Client ID used by Gemini.kt.
+        buildConfigField("String", "BACKEND_URL", "\"https://scantype-api.scantype.workers.dev\"")
+        buildConfigField("String", "GOOGLE_CLIENT_ID", "\"\"")
     }
 
     signingConfigs {
