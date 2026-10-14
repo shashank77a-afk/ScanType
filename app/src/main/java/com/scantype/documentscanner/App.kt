@@ -534,6 +534,11 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                 }
             }
         }
+        if (!selecting) item {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ScanTypeBannerAd()
+            }
+        }
         item {
             if (selecting) Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton({ onSelecting(false) }) { Icon(Icons.Filled.Close, "Cancel") }
@@ -571,11 +576,6 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             text = { OutlinedTextField(name, { name = it }, singleLine = true) },
             confirmButton = { TextButton({ store.createFolder(name); newFolder = false; refresh() }) { Text("Create") } },
             dismissButton = { TextButton({ newFolder = false }) { Text("Cancel") } })
-        item {
-            androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                ScanTypeBannerAd()
-            }
-        }
     }
 }
 
