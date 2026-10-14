@@ -18,30 +18,19 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private const val DEFAULT_SCANTYPE_BACKEND_URL = "https://scantype-api.scantype.workers.dev"
-private const val DEFAULT_GOOGLE_WEB_CLIENT_ID = "374340878770-ggk3oif0h68vmv3mpteeidpoa87lqak2.apps.googleusercontent.com"
-
 /** Google Sign-In with the official Credential Manager API. Only the ID token is used, and the server verifies it. */
 object GoogleAuth {
     suspend fun idToken(activity: Activity, webClientId: String): String {
-        if (webClientId.isBlank()) throw AiException("no_client", "Google sign-in is not configured. Please contact support.")
-        // Show the account chooser instead of using the dedicated Sign in with Google button flow.
-        // This is generally more suitable for an app's normal sign-in screen.
-        val option = GetGoogleIdOption.Builder()
-            .setFilterByAuthorizedAccounts(false)
-            .setServerClientId(webClientId)
-            .setAutoSelectEnabled(false)
-            .build()
-        val request = GetCredentialRequest.Builder()
-            .addCredentialOption(option)
-            .build()
+        if (webClientId.isBlank()) throw AiException("no_client", "The Google sign-in configuration is missing.")
+        val option = GetSignInWithGoogleOption.Builder(webClientId).build()
+        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         val cred = CredentialManager.create(activity).getCredential(activity, request).credential
         if (cred is CustomCredential && cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
             return GoogleIdTokenCredential.createFrom(cred.data).idToken
@@ -50,11 +39,11 @@ object GoogleAuth {
     }
 
     fun message(e: Exception): String = when (e) {
-        is GetCredentialCancellationException -> "Sign-in was cancelled."
+        is GetCredentialCancellationException -> "Sign-in did not complete. If you did not cancel it, the app signature (SHA-1) or the Google client ID is not set up correctly. Please check the Google sign-in configuration and try again."
         is NoCredentialException -> "No Google account was found on this phone. Add a Google account in the phone Settings and try again."
-        is GetCredentialException -> "Google sign-in failed (${e.javaClass.simpleName}). Please check Google Cloud OAuth setup and try again."
+        is GetCredentialException -> "Google sign-in failed. Please try again."
         is AiException -> if (e.code == "no_client") (e.message ?: "") else aiMessage(e)
-        else -> "Sign-in failed (${e.javaClass.simpleName}). Please try again."
+        else -> "Sign-in failed. Please try again."
     }
 }
 
@@ -63,10 +52,14 @@ object GoogleAuth {
 fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, close: () -> Unit) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
-    LaunchedEffect(prefs) {
-        if (prefs.backendUrl.isBlank()) prefs.backendUrl = DEFAULT_SCANTYPE_BACKEND_URL
-        if (prefs.googleClientId.isBlank()) prefs.googleClientId = DEFAULT_GOOGLE_WEB_CLIENT_ID
-    }
+    // ScanType deployment defaults supplied by the app owner.
+    val defaultBackendUrl = "https://scantype-api.scantype.workers.dev"
+    val defaultGoogleWebClientId = "374340878770-ggk3oif0h68vmv3mpteeidpoa87lqak2.apps.googleusercontent.com"
+
+    // Keep the displayed values and the values used by the sign-in request in sync.
+    if (prefs.backendUrl != defaultBackendUrl) prefs.backendUrl = defaultBackendUrl
+    if (prefs.googleClientId != defaultGoogleWebClientId) prefs.googleClientId = defaultGoogleWebClientId
+
     var working by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val usage = prefs.usage
@@ -99,7 +92,8 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                         Text("Scanning, crop, PDF and Word work without an account. Sign in only to use AI handwriting recognition.",
                             style = MaterialTheme.typography.bodySmall)
                         Button({
-                            withGoogle { token -> Backend.signIn(prefs, token); say("Signed in") }
+                            if (prefs.backendUrl.isBlank()) say("Server configuration is missing. Please reinstall or update the app.")
+                            else withGoogle { token -> Backend.signIn(prefs, token); say("Signed in") }
                         }, enabled = !working) { Text("Sign in with Google") }
                     }
                     if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
