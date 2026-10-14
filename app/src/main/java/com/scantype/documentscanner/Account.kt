@@ -1,6 +1,10 @@
 package com.scantype.documentscanner
 
 import android.app.Activity
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import java.security.MessageDigest
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,7 +32,7 @@ import java.util.Date
 /** Google Sign-In with the official Credential Manager API. Only the ID token is used, and the server verifies it. */
 object GoogleAuth {
     suspend fun idToken(activity: Activity, webClientId: String): String {
-        if (webClientId.isBlank()) throw AiException("no_client", "The Google sign-in configuration is missing.")
+        if (webClientId.isBlank()) throw AiException("no_client", "Sign-in is not available right now. Please try again later.")
         val option = GetSignInWithGoogleOption.Builder(webClientId).build()
         val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
         val cred = CredentialManager.create(activity).getCredential(activity, request).credential
@@ -38,8 +42,18 @@ object GoogleAuth {
         throw AiException("bad_credential", "Google sign-in returned an unsupported result.")
     }
 
+    /** SHA-1 of the certificate this APK is signed with. It must match the Android OAuth client in Google Cloud. */
+    fun apkSha1(ctx: Context): String = runCatching {
+        val pm = ctx.packageManager
+        val cert = if (Build.VERSION.SDK_INT >= 28)
+            pm.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners?.firstOrNull()
+        else @Suppress("DEPRECATION") pm.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNATURES).signatures?.firstOrNull()
+        if (cert == null) "unknown"
+        else MessageDigest.getInstance("SHA-1").digest(cert.toByteArray()).joinToString(":") { "%02X".format(it) }
+    }.getOrDefault("unknown")
+
     fun message(e: Exception): String = when (e) {
-        is GetCredentialCancellationException -> "Sign-in did not complete. If you did not cancel it, the app signature (SHA-1) or the Google client ID is not set up correctly. Please check the Google sign-in configuration and try again."
+        is GetCredentialCancellationException -> "Sign-in did not complete. Please try again."
         is NoCredentialException -> "No Google account was found on this phone. Add a Google account in the phone Settings and try again."
         is GetCredentialException -> "Google sign-in failed. Please try again."
         is AiException -> if (e.code == "no_client") (e.message ?: "") else aiMessage(e)
@@ -92,7 +106,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                         Text("Scanning, crop, PDF and Word work without an account. Sign in only to use AI handwriting recognition.",
                             style = MaterialTheme.typography.bodySmall)
                         Button({
-                            if (prefs.backendUrl.isBlank()) say("Server configuration is missing. Please reinstall or update the app.")
+                            if (prefs.backendUrl.isBlank()) say("Server is not available right now. Please try again later.")
                             else withGoogle { token -> Backend.signIn(prefs, token); say("Signed in") }
                         }, enabled = !working) { Text("Sign in with Google") }
                     }
