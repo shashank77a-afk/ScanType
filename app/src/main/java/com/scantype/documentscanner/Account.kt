@@ -1,6 +1,12 @@
 package com.scantype.documentscanner
 
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import java.security.MessageDigest
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,8 +31,6 @@ import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
-private const val DEFAULT_SCANTYPE_BACKEND_URL = "https://scantype-api.scantype.workers.dev"
-
 /** Google Sign-In with the official Credential Manager API. Only the ID token is used, and the server verifies it. */
 object GoogleAuth {
     suspend fun idToken(activity: Activity, webClientId: String): String {
@@ -40,8 +44,18 @@ object GoogleAuth {
         throw AiException("bad_credential", "Google sign-in returned an unsupported result.")
     }
 
+    /** SHA-1 of the certificate this APK is signed with. It must match the Android OAuth client in Google Cloud. */
+    fun apkSha1(ctx: Context): String = runCatching {
+        val pm = ctx.packageManager
+        val cert = if (Build.VERSION.SDK_INT >= 28)
+            pm.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo?.apkContentsSigners?.firstOrNull()
+        else @Suppress("DEPRECATION") pm.getPackageInfo(ctx.packageName, PackageManager.GET_SIGNATURES).signatures?.firstOrNull()
+        if (cert == null) "unknown"
+        else MessageDigest.getInstance("SHA-1").digest(cert.toByteArray()).joinToString(":") { "%02X".format(it) }
+    }.getOrDefault("unknown")
+
     fun message(e: Exception): String = when (e) {
-        is GetCredentialCancellationException -> "Sign-in was cancelled."
+        is GetCredentialCancellationException -> "Sign-in did not complete. If you did not cancel it, the app signature (SHA-1) or the Google client ID is not set up correctly. See Sign-in help below."
         is NoCredentialException -> "No Google account was found on this phone. Add a Google account in the phone Settings and try again."
         is GetCredentialException -> "Google sign-in failed. Please try again."
         is AiException -> if (e.code == "no_client") (e.message ?: "") else aiMessage(e)
@@ -54,15 +68,20 @@ object GoogleAuth {
 fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, close: () -> Unit) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
-    var url by remember { mutableStateOf(prefs.backendUrl.ifBlank { DEFAULT_SCANTYPE_BACKEND_URL }) }
-    LaunchedEffect(prefs) {
-        if (prefs.backendUrl.isBlank()) {
-            prefs.backendUrl = DEFAULT_SCANTYPE_BACKEND_URL
-        }
-    }
-    var cid by remember { mutableStateOf(prefs.googleClientId) }
+    // ScanType deployment defaults supplied by the app owner.
+    val defaultBackendUrl = "https://scantype-api.scantype.workers.dev"
+    val defaultGoogleWebClientId = "374340878770-ggk3oif0h68vmv3mpteeidpoa87lqak2.apps.googleusercontent.com"
+
+    // Keep the displayed values and the values used by the sign-in request in sync.
+    if (prefs.backendUrl != defaultBackendUrl) prefs.backendUrl = defaultBackendUrl
+    if (prefs.googleClientId != defaultGoogleWebClientId) prefs.googleClientId = defaultGoogleWebClientId
+
+    var url by remember { mutableStateOf(defaultBackendUrl) }
+    var cid by remember { mutableStateOf(defaultGoogleWebClientId) }
     var working by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var lastError by remember { mutableStateOf("") }
+    val sha1 = remember { GoogleAuth.apkSha1(ctx) }
     val usage = prefs.usage
     fun say(m: String) { scope.launch { snack.showSnackbar(m) } }
 
@@ -70,7 +89,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
         scope.launch {
             working = true
             try { after(GoogleAuth.idToken(activity, prefs.googleClientId)) }
-            catch (e: Exception) { say(GoogleAuth.message(e)) }
+            catch (e: Exception) { lastError = e::class.java.simpleName + ": " + (e.message ?: ""); say(GoogleAuth.message(e)) }
             finally { working = false }
         }
     }
@@ -121,6 +140,22 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                     OutlinedTextField(cid, { cid = it; prefs.googleClientId = it }, Modifier.fillMaxWidth(), singleLine = true,
                         label = { Text("Google Web client ID") })
                     Text("These are not secrets. The Gemini key stays only on your Cloudflare server.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Card(shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Sign-in help", style = MaterialTheme.typography.titleMedium)
+                    Text("Package name: ${ctx.packageName}", style = MaterialTheme.typography.bodySmall)
+                    Text("This APK's SHA-1:\n$sha1", style = MaterialTheme.typography.bodySmall)
+                    Text("Web client ID in use: " + (if (cid.isBlank()) "(empty)" else cid.take(12) + "…" + cid.takeLast(30)), style = MaterialTheme.typography.bodySmall)
+                    Text("In Google Cloud there must be an ANDROID client with exactly this package name and SHA-1, and the ID typed above must be a WEB APPLICATION client from the same project. Your Google account must be listed under Test users while the app is in Testing.",
+                        style = MaterialTheme.typography.bodySmall)
+                    if (lastError.isNotEmpty()) Text("Last error: $lastError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    OutlinedButton({
+                        val text = "package=${ctx.packageName}\nsha1=$sha1\nwebClientId=$cid\nserver=$url\nlastError=$lastError"
+                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ScanType sign-in details", text))
+                        say("Details copied")
+                    }) { Text("Copy details") }
                 }
             }
             Card(shape = RoundedCornerShape(20.dp)) {
