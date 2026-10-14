@@ -54,6 +54,7 @@ class ToolItem(val icon: ImageVector, val label: String, val tint: Color, val on
 fun App(prefs: Prefs) {
     val ctx = LocalContext.current
     val activity = ctx as ComponentActivity
+    LaunchedEffect(Unit) { ScanTypeAds.initialize(ctx) }
     val scope = rememberCoroutineScope()
     val store = remember { DocStore(ctx) }
     var tab by remember { mutableIntStateOf(0) }
@@ -266,7 +267,11 @@ fun App(prefs: Prefs) {
     if (st != null) {
         BackHandler { studio = null }
         StudioScreen(st, store, snack, scope, { studio = null },
-            { studio = null; editor = null; refresh(); tab = 0; toast("Saved to Documents") })
+            {
+                // This callback is reached only after the PDF file was created successfully.
+                studio = null; editor = null; refresh(); tab = 0; toast("Saved to Documents")
+                ScanTypeAds.showInterstitial(activity)
+            })
         return
     }
     val ed = editor
@@ -566,6 +571,11 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             text = { OutlinedTextField(name, { name = it }, singleLine = true) },
             confirmButton = { TextButton({ store.createFolder(name); newFolder = false; refresh() }) { Text("Create") } },
             dismissButton = { TextButton({ newFolder = false }) { Text("Cancel") } })
+        item {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ScanTypeBannerAd()
+            }
+        }
     }
 }
 
