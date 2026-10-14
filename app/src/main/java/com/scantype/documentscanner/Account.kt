@@ -18,7 +18,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
-import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -32,8 +32,16 @@ private const val DEFAULT_GOOGLE_WEB_CLIENT_ID = "374340878770-ggk3oif0h68vmv3mp
 object GoogleAuth {
     suspend fun idToken(activity: Activity, webClientId: String): String {
         if (webClientId.isBlank()) throw AiException("no_client", "Google sign-in is not configured. Please contact support.")
-        val option = GetSignInWithGoogleOption.Builder(webClientId).build()
-        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+        // Show the account chooser instead of using the dedicated Sign in with Google button flow.
+        // This is generally more suitable for an app's normal sign-in screen.
+        val option = GetGoogleIdOption.Builder()
+            .setFilterByAuthorizedAccounts(false)
+            .setServerClientId(webClientId)
+            .setAutoSelectEnabled(false)
+            .build()
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(option)
+            .build()
         val cred = CredentialManager.create(activity).getCredential(activity, request).credential
         if (cred is CustomCredential && cred.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
             return GoogleIdTokenCredential.createFrom(cred.data).idToken
@@ -44,9 +52,9 @@ object GoogleAuth {
     fun message(e: Exception): String = when (e) {
         is GetCredentialCancellationException -> "Sign-in was cancelled."
         is NoCredentialException -> "No Google account was found on this phone. Add a Google account in the phone Settings and try again."
-        is GetCredentialException -> "Google sign-in failed. Please try again."
+        is GetCredentialException -> "Google sign-in failed (${e.javaClass.simpleName}). Please check Google Cloud OAuth setup and try again."
         is AiException -> if (e.code == "no_client") (e.message ?: "") else aiMessage(e)
-        else -> "Sign-in failed. Please try again."
+        else -> "Sign-in failed (${e.javaClass.simpleName}). Please try again."
     }
 }
 
