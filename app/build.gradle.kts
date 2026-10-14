@@ -28,6 +28,14 @@ android {
     }
 
     signingConfigs {
+        // GitHub Actions restores the persistent debug keystore to ~/.android/debug.keystore.
+        create("persistentDebug") {
+            storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+
         if (ksFile.exists()) {
             create("release") {
                 storeFile = file(ks["storeFile"] as String)
@@ -40,7 +48,8 @@ android {
 
     buildTypes {
         debug {
-            // Keep BuildConfig available for debug builds.
+            // Always use the persistent keystore restored by GitHub Actions.
+            signingConfig = signingConfigs.getByName("persistentDebug")
         }
 
         release {
@@ -84,8 +93,7 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment:1.8.3")
-    // Guava contains ListenableFuture (used by CameraX ProcessCameraProvider).
-    // listenablefuture:1.0 can get overridden by an empty 9999.0 stub, so use full Guava.
+    // Full Guava provides ListenableFuture used by CameraX.
     implementation("com.google.guava:guava:33.3.1-android")
     implementation("androidx.camera:camera-core:1.3.4")
     implementation("androidx.camera:camera-camera2:1.3.4")
