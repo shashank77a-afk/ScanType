@@ -89,7 +89,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
     val fail = "Could not create the PDF. Please try again."
 
     Scaffold(
-        topBar = { TopAppBar({ Text("Handwritten letter to PDF") }, navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
+        topBar = { TopAppBar({ Text("Same-Layout Typed PDF") }, navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         Column(Modifier.padding(pad)) {
@@ -101,7 +101,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Take a photo of the handwritten letter, or choose one from the gallery. Crop it to the page edges for the best layout.")
+                    Text("Take a clear photo of the full letter page, or choose one from the gallery. Keep all page edges visible and avoid perspective tilt so the layout can be rebuilt.")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onAddCamera, Modifier.weight(1f)) { Text("Camera") }
                         OutlinedButton({ pickG.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(1f)) { Text("Gallery") }
@@ -127,7 +127,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             Text("Check every block. Words marked [?] were unclear. Names, dates, numbers and amounts are never changed by the app.",
                                 style = MaterialTheme.typography.bodySmall)
                             Text("Output", style = MaterialTheme.typography.titleSmall)
-                            Chips("Same layout" to !opts.clean, "Clean professional letter" to opts.clean) { opts = opts.copy(clean = it == 1) }
+                            Chips("Same-Layout Typed PDF" to !opts.clean, "Clean professional letter" to opts.clean) { opts = opts.copy(clean = it == 1) }
                             Text("Font size", style = MaterialTheme.typography.titleSmall)
                             Chips(*listOf(11f, 12f, 13f, 14f, 16f).map { "${it.toInt()}" to (opts.baseFont == it) }.toTypedArray()) { opts = opts.copy(baseFont = listOf(11f, 12f, 13f, 14f, 16f)[it]) }
                             Text("Line spacing", style = MaterialTheme.typography.titleSmall)
@@ -204,7 +204,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                                 Text("Automatic adjustments (you can change them in step 2):", style = MaterialTheme.typography.titleSmall)
                                 notes.forEach { Text("• $it", fontSize = 12.sp) }
                             }
-                            item { Text("The PDF contains real, selectable text. Your original photo is kept separately on this phone.", style = MaterialTheme.typography.bodySmall) }
+                            item { Text(if (opts.clean) "The PDF contains selectable typed text in a clean letter format. Your original photo is kept separately on this phone." else "The PDF contains selectable text placed to resemble the photographed letter. OCR and layout can vary, so review every block before saving.", style = MaterialTheme.typography.bodySmall) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button({
