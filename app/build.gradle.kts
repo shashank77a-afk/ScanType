@@ -84,6 +84,8 @@ dependencies {
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.fragment:fragment:1.8.3")
+    // Explicitly provide ListenableFuture used by CameraX ProcessCameraProvider.
+    implementation("com.google.guava:listenablefuture:1.0")
     implementation("androidx.camera:camera-core:1.3.4")
     implementation("androidx.camera:camera-camera2:1.3.4")
     implementation("androidx.camera:camera-lifecycle:1.3.4")
