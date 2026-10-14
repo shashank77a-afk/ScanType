@@ -68,7 +68,7 @@ object GoogleAuth {
 fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, close: () -> Unit) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
-    // ScanType deployment defaults supplied by the app owner.
+    // Scanner.ai deployment defaults supplied by the app owner.
     val defaultBackendUrl = "https://scantype-api.scantype.workers.dev"
     val defaultGoogleWebClientId = "374340878770-ggk3oif0h68vmv3mpteeidpoa87lqak2.apps.googleusercontent.com"
 
@@ -153,7 +153,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                     if (lastError.isNotEmpty()) Text("Last error: $lastError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     OutlinedButton({
                         val text = "package=${ctx.packageName}\nsha1=$sha1\nwebClientId=$cid\nserver=$url\nlastError=$lastError"
-                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ScanType sign-in details", text))
+                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Scanner.ai sign-in details", text))
                         say("Details copied")
                     }) { Text("Copy details") }
                 }
@@ -161,7 +161,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
             Card(shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Privacy", style = MaterialTheme.typography.titleMedium)
-                    Text("When you use AI recognition, the page image you choose is sent over HTTPS to your ScanType server, which forwards it to Google Gemini and returns the text. The server does not store your documents or the recognised text. Turn AI on or off in Settings.",
+                    Text("When you use AI recognition, the page image you choose is sent over HTTPS to your Scanner.ai server, which forwards it to Google Gemini and returns the text. The server does not store your documents or the recognised text. Turn AI on or off in Settings.",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }

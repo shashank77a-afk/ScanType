@@ -1,5 +1,5 @@
 
-name: Build APK
+name: Scanner.ai Build APK
 
 on:
   push:
@@ -36,5 +36,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ScanType-debug-apk
+          name: Scanner.ai-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk

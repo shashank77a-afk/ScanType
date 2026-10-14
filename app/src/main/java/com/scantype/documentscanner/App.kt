@@ -16,6 +16,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -392,7 +393,8 @@ fun App(prefs: Prefs) {
             when (tab) {
                 0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
-                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true })
+                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
+                    { openCam(CamMode.DOCS) }, { letter = LetterState() }, { tab = 1 }, { openCam(CamMode.QR) })
                 else -> ToolsScreen(sections)
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
@@ -465,7 +467,36 @@ fun ToolsScreen(sections: List<Pair<String, List<ToolItem>>>) {
                 }
             }
         }
-        item { Text("Everything here works offline except AI text recognition.", style = MaterialTheme.typography.bodySmall) }
+        item { Text("AI recognition requires AI to be enabled; offline scanning and PDF tools remain available.", style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+@Composable
+private fun DashboardSectionTitle(title: String, subtitle: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun DashboardToolCard(
+    title: String, subtitle: String, icon: ImageVector, container: Color, tint: Color,
+    modifier: Modifier, onClick: () -> Unit, outlined: Boolean = false
+) {
+    Card(
+        onClick = onClick, modifier = modifier.heightIn(min = 150.dp), shape = RoundedCornerShape(22.dp),
+        border = if (outlined) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
+        colors = CardDefaults.cardColors(containerColor = container),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (outlined) 0.dp else 1.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Box(Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(tint.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = title, tint = tint, modifier = Modifier.size(23.dp))
+            }
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 2)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3)
+        }
     }
 }
 
@@ -487,7 +518,8 @@ fun ToolTile(t: ToolItem, modifier: Modifier) {
 @Composable
 fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
                selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
-               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit, onAccount: () -> Unit) {
+               onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit, onAccount: () -> Unit,
+               onScan: () -> Unit, onSmartPdf: () -> Unit, onTools: () -> Unit, onQr: () -> Unit) {
     var q by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
@@ -498,47 +530,82 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         (folder == null || store.folderOf(f) == folder) &&
             (q.isBlank() || f.nameWithoutExtension.contains(q, true) || store.searchText(f).contains(q, true))
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 24.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val homeListState = rememberLazyListState()
+    val homeScope = rememberCoroutineScope()
+    LazyColumn(state = homeListState, modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)))
-                Spacer(Modifier.width(10.dp))
-                Text("ScanType", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.weight(1f))
+                Image(painterResource(R.drawable.scantype_logo), "Scanner.ai logo", Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Scanner.ai", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onBackground)
+                    Text("Scan smarter. Create more.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
                 IconButton(onAccount) { Icon(Icons.Filled.AccountCircle, "Account") }
                 IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
             }
         }
         if (searching) item {
-            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search name or text") },
-                singleLine = true, shape = RoundedCornerShape(16.dp))
+            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search documents or text") }, singleLine = true, shape = RoundedCornerShape(16.dp))
         }
         if (!selecting) item {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                .background(Brush.linearGradient(listOf(Blue, Cyan))).padding(18.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Scan. Convert. Edit. PDF.", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Hindi & English handwriting to typed text", color = Color.White.copy(alpha = 0.92f))
-                    Spacer(Modifier.height(4.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        val pad = PaddingValues(horizontal = 6.dp)
-                        Button(onHand, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("Handwriting", fontSize = 12.sp) }
-                        OutlinedButton(onText, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image→Text", fontSize = 12.sp) }
-                        OutlinedButton(onPdf, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Text→PDF", fontSize = 12.sp) }
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Color(0xFFDCF4FF), Color(0xFFEDE6FF), Color(0xFFD9FBF0)))).padding(18.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Your documents, upgraded with AI", color = Color(0xFF17233F), fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("Hindi & English handwriting to editable text, with smarter PDF tools.", color = Color(0xFF38445C), fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onHand, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6CE8), contentColor = Color.White)) {
+                            Icon(Icons.Filled.Edit, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Handwriting", fontSize = 12.sp)
+                        }
+                        OutlinedButton(onPdf, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) {
+                            Icon(Icons.Filled.Description, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Text → PDF", fontSize = 12.sp)
+                        }
                     }
                 }
             }
         }
+        if (!selecting) item { DashboardSectionTitle("AI Tools", "Recognize, review and recreate documents") }
         if (!selecting) item {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                ScanTypeBannerAd()
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardToolCard("Handwriting to Text", "हस्तलिखित को typed text में बदलें", Icons.Filled.Psychology, Color(0xFFE8F2FF), Color(0xFF3169D8), Modifier.weight(1f), onHand)
+                DashboardToolCard("OCR Text Review", "पहचाने गए टेक्स्ट को जाँचें", Icons.Filled.Article, Color(0xFFF0E9FF), Color(0xFF8250C8), Modifier.weight(1f), onText)
             }
         }
+        if (!selecting) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardToolCard("Smart PDF", "उसी लेआउट के करीब typed PDF", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), onSmartPdf)
+                DashboardToolCard("Hindi + English OCR", "दोनों भाषाओं में text पहचानें", Icons.Filled.Translate, Color(0xFFFFF0E5), Color(0xFFC66A2B), Modifier.weight(1f), onText)
+            }
+        }
+        if (!selecting) item { DashboardSectionTitle("Non-AI Tools", "Essential document tools that work locally") }
+        if (!selecting) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardToolCard("Document Scan", "स्कैन और crop करें", Icons.Filled.DocumentScanner, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onScan, outlined = true)
+                DashboardToolCard("PDF Tools", "Merge, split, compress", Icons.Filled.Layers, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onTools, outlined = true)
+            }
+        }
+        if (!selecting) item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                DashboardToolCard("QR Scanner", "QR और barcode scan", Icons.Filled.QrCodeScanner, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onQr, outlined = true)
+                DashboardToolCard("My Documents", "सेव किए दस्तावेज़", Icons.Filled.FolderOpen, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), {
+                    searching = false; q = ""; folder = null
+                    homeScope.launch { homeListState.animateScrollToItem(10) }
+                }, outlined = true)
+            }
+        }
+        if (!selecting) item {
+            Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Lightbulb, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("AI recognition needs AI enabled in Settings. Scanning and PDF tools remain available locally.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (!selecting) item { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { ScanTypeBannerAd() } }
         item {
             if (selecting) Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton({ onSelecting(false) }) { Icon(Icons.Filled.Close, "Cancel") }
