@@ -9,4 +9,6 @@
 
 ## Cloudflare Worker backend
 
-The production Worker `scantype-api` is deployed separately from this Android repository. Keep its source in a dedicated backend repository and deploy it from version-controlled source. Do not commit secrets; configure `GEMINI_API_KEY` as a Cloudflare secret binding. The Cloudflare Worker source is deployed separately from this Android repository. The currently active Worker version is managed directly in Cloudflare; do not redeploy from this Android repository without syncing the backend source. Gemini model is controlled by the GEMINI_MODEL variable; GEMINI_API_KEY must remain a Cloudflare secret binding.
+The production Worker `scantype-api` is deployed separately from this Android repository. Keep its source in a dedicated backend repository and deploy it from version-controlled source. Do not commit secrets; configure `GEMINI_API_KEY` as a Cloudflare secret binding.
+
+The currently active Worker version is managed directly in Cloudflare. Do not redeploy from this Android repository without syncing the backend source. Gemini model is controlled by the `GEMINI_MODEL` variable; `GEMINI_API_KEY` must remain a Cloudflare secret binding.
