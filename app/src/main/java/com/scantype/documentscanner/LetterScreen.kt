@@ -72,7 +72,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
     fun runRecognition() {
         if (s.images.isEmpty() || working != null) return
         scope.launch {
-            working = "Reading text and reconstructing the layout…"
+            working = "Reading text on this device…"
             val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList()) }
             working = null
             res.onSuccess { r ->
@@ -80,14 +80,9 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 s.original = r.blocks; s.source = r.source; s.note = r.note; s.needLogin = r.needLogin
                 if (r.blocks.isEmpty()) {
                     step = 0
-                    say(r.note.ifBlank { "No readable text was found. Retake the page straight-on in bright light." })
-                } else if (r.source != "AI") {
-                    // Same-layout output must come from the AI layout service; offline OCR is not an equivalent result.
-                    step = 0
-                    s.note = r.note.ifBlank { "AI layout recognition failed. Check your connection and try again." }
-                    say(s.note)
+                    say(r.note.ifBlank { "No readable text was found. Improve the crop or lighting and retry." })
                 } else {
-                    working = "Creating typed PDF…"
+                    working = "Creating typed PDF locally…"
                     val saved = withContext(Dispatchers.IO) {
                         runCatching {
                             val f = store.newFileExt("Typed_" + stamp(), "pdf")
@@ -107,40 +102,33 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         val opened = runCatching { ctx.startActivity(view) }.isSuccess
                         if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
+                        if (r.note.isNotBlank()) say(r.note)
                         onSaved()
                     } else {
                         step = 0
-                        s.note = "Could not create a valid PDF. Please try again with a clearer image."
+                        s.note = "Could not create a valid PDF. Please try again."
                         say(s.note)
                     }
                 }
             }.onFailure { e ->
-                s.note = e.message?.takeIf { it.isNotBlank() } ?: "AI recognition failed. Check your internet connection and try again."
+                s.note = e.message?.takeIf { it.isNotBlank() } ?: "Text recognition failed. Please retry."
                 step = 0
                 say(s.note)
             }
         }
     }
 
-    LaunchedEffect(s.images.map { it.toString() }, prefs.signedIn, prefs.aiReady) {
+    LaunchedEffect(s.images.map { it.toString() }) {
         val key = s.images.joinToString("|") { it.toString() }
         if (key.isNotBlank() && key != lastAutoKey && working == null) {
             lastAutoKey = key
-            if (!prefs.signedIn) {
-                onAccount()
-            } else if (!prefs.aiReady) {
-                s.note = "AI recognition is turned off. Enable AI in Settings to create a Same-Layout Typed PDF."
-                say(s.note)
-            } else {
-                runRecognition()
-            }
+            if (!prefs.signedIn) onAccount() else runRecognition()
         }
     }
 
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
-        if (!prefs.signedIn) { onAccount(); return }
-        if (!prefs.aiReady) showAiHint = true else runRecognition()
+        runRecognition()
     }
 
     fun render(f: File): LayoutReport = if (opts.clean) LayoutPdf.clean(s.blocks.toList(), opts, f) else LayoutPdf.render(s.blocks.toList(), opts, f)
@@ -160,14 +148,13 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Handwriting photo चुनें या Camera से लें। इसके बाद AI अपने-आप typed PDF बनाएगा और खोल देगा। कोई layout setting नहीं चुननी पड़ेगी.")
+                    Text("Photo चुनें या Camera से लें। AI handwriting और layout पहचानेगा और typed PDF बनाएगा।")
                     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(if (prefs.aiReady) "AI layout recognition is enabled" else "AI layout recognition is off",
+                            Text("AI Same-Layout Typed PDF",
                                 style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             Text(
-                                if (prefs.aiReady) "Photo चुनते ही text और layout पहचाना जाएगा, PDF बनेगा और खुलेगा."
-                                else "इस सुविधा के लिए Google Login और AI recognition चालू होना ज़रूरी है.",
+                                "यह सुविधा केवल AI से चलती है। फोटो AI service को भेजी जाएगी; PDF अपने-आप बनेगी.",
                                 style = MaterialTheme.typography.bodySmall
                             )
 
@@ -187,7 +174,8 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                         }
                     }
                     if (s.images.isNotEmpty() && working == null) {
-                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry PDF creation") }
+                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry AI PDF creation") }
+                        
                     }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -322,19 +310,6 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 }
             }
         }
-    }
-    if (showAiHint) {
-        AlertDialog(
-            onDismissRequest = { showAiHint = false },
-            title = { Text("Enable AI for better layout matching?") },
-            text = { Text("AI is currently off. Turn on AI in Settings before using Same-Layout Typed PDF. No offline PDF will be created because it may not preserve the handwriting or layout.") },
-            confirmButton = {
-                TextButton(onClick = { showAiHint = false; onSettings() }) { Text("Open Settings") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAiHint = false }) { Text("Cancel") }
-            }
-        )
     }
 }
 
