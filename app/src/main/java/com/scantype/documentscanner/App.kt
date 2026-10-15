@@ -502,7 +502,7 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "Scanner.ai logo", Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)))
+                Image(painterResource(R.drawable.scannera_logo), "Scanner.ai logo", Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)))
                 Spacer(Modifier.width(10.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
                     Text("Scanner.ai", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
