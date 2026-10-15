@@ -502,9 +502,12 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)))
+                Image(painterResource(R.drawable.scantype_logo), "Scanner.ai logo", Modifier.size(42.dp).clip(RoundedCornerShape(10.dp)))
                 Spacer(Modifier.width(10.dp))
-                Text("ScanType", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    Text("Scanner.ai", fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                    Text("SCAN • CONVERT • CREATE", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.1.sp, color = MaterialTheme.colorScheme.secondary)
+                }
                 Spacer(Modifier.weight(1f))
                 IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
                 IconButton(onAccount) { Icon(Icons.Filled.AccountCircle, "Account") }
@@ -519,17 +522,17 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                 .background(Brush.linearGradient(listOf(Blue, Cyan))).padding(18.dp)) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Scan. Convert. Edit. PDF.", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Hindi & English handwriting to typed text", color = Color.White.copy(alpha = 0.92f))
+                    Text("Scan smarter. Create faster.", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("AI scanner • OCR • PDF & Word", color = Color.White.copy(alpha = 0.92f))
                     Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         val pad = PaddingValues(horizontal = 6.dp)
                         Button(onHand, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("Handwriting", fontSize = 12.sp) }
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Blue)) { Text("AI Handwriting", fontSize = 12.sp) }
                         OutlinedButton(onText, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image→Text", fontSize = 12.sp) }
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Image → Text", fontSize = 12.sp) }
                         OutlinedButton(onPdf, Modifier.weight(1f), contentPadding = pad,
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Text→PDF", fontSize = 12.sp) }
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)) { Text("Text → PDF", fontSize = 12.sp) }
                     }
                 }
             }
