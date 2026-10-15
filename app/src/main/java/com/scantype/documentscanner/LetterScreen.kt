@@ -56,6 +56,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
     var opts by remember { mutableStateOf(LetterOpts()) }
     var name by remember { mutableStateOf("Letter_" + stamp()) }
     var open by remember { mutableIntStateOf(-1) }
+    var lastAutoKey by remember { mutableStateOf("") }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Downloads on this Android version.") } }
     fun say(m: String) { scope.launch { snack.showSnackbar(m) } }
 
@@ -118,6 +119,14 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
+    LaunchedEffect(s.images.map { it.toString() }, prefs.signedIn, prefs.aiReady) {
+        val key = s.images.joinToString("|") { it.toString() }
+        if (key.isNotBlank() && key != lastAutoKey && prefs.signedIn && prefs.aiReady && working == null) {
+            lastAutoKey = key
+            runRecognition()
+        }
+    }
+
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
         if (!prefs.signedIn) { onAccount(); return }
@@ -137,25 +146,21 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         Column(Modifier.padding(pad)) {
-            TabRow(selectedTabIndex = step) {
-                Tab(step == 0, { step = 0 }, text = { Text("1 Photo") })
-                Tab(step == 1, { if (s.blocks.isNotEmpty()) step = 1 }, text = { Text("2 Edit") })
-                Tab(step == 2, { if (s.blocks.isNotEmpty()) step = 2 }, text = { Text("3 Preview") })
-            }
+            if (working != null) Text(working!!, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.bodyMedium)
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Take a clear photo of the full letter page, or choose one from the gallery. Keep all page edges visible and avoid perspective tilt so the layout can be rebuilt.")
+                    Text("Handwriting photo चुनें या Camera से लें। इसके बाद AI अपने-आप typed PDF बनाएगा और खोल देगा। कोई layout setting नहीं चुननी पड़ेगी.")
                     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(if (prefs.aiReady) "AI layout recognition is enabled" else "AI layout recognition is off",
                                 style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             Text(
-                                if (prefs.aiReady) "The app will use AI to identify Hindi/English text blocks and their positions. Review the result before saving."
-                                else "Without AI, on-device OCR may miss Hindi handwriting and page positions. Enable AI for the best chance of matching the original layout, or continue offline and correct the text manually.",
+                                if (prefs.aiReady) "Photo चुनते ही text और layout पहचाना जाएगा, PDF बनेगा और खुलेगा."
+                                else "इस सुविधा के लिए Google Login और AI recognition चालू होना ज़रूरी है.",
                                 style = MaterialTheme.typography.bodySmall
                             )
-                            if (!prefs.aiReady) TextButton(onSettings) { Text("Open AI Settings") }
+
                         }
                     }
                     if (s.note.isNotEmpty()) Text(s.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -171,9 +176,9 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             TextButton({ s.images.removeAt(i); if (i < s.origs.size) s.origs.removeAt(i) }) { Text("Remove") }
                         }
                     }
-                    Button({ recognize() }, Modifier.fillMaxWidth(), enabled = s.images.isNotEmpty() && working == null) { Text("Recognize Text & Layout") }
-                    Text(if (prefs.aiReady) "AI recognition is on (internet needed)." else "AI is off: on-device recognition will be used. It is weak on handwriting; turn AI on in Settings for better results.",
-                        style = MaterialTheme.typography.bodySmall)
+                    if (s.images.isNotEmpty() && working == null) {
+                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry PDF creation") }
+                    }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item {
