@@ -150,7 +150,25 @@ object Backend {
         refreshIfNeeded(prefs)
         val r = call(prefs, "POST", "/api/ai/letter-layout", imageBody(jpeg, lang), true)
         r.optJSONObject("usage")?.let { prefs.applyUsage(it) }
-        return r.getJSONObject("layout")
+        val layout = r.optJSONObject("layout")
+            ?: throw AiException("letter_layout_invalid", "The AI server did not return a valid layout object. Please retry.")
+        // Worker can return a normalized layout or a paragraph-text fallback.
+        val blocks = layout.optJSONArray("blocks")
+            ?: layout.optJSONArray("elements")
+            ?: layout.optJSONArray("paragraphs")
+            ?: layout.optJSONArray("items")
+            ?: layout.optJSONArray("lines")
+        if (blocks == null || blocks.length() == 0) {
+            val fallbackText = layout.optString("text", "").trim()
+            if (fallbackText.isNotEmpty()) {
+                return JSONObject()
+                    .put("language", layout.optString("language", lang))
+                    .put("pageAspect", layout.optDouble("pageAspect", 0.707))
+                    .put("blocks", org.json.JSONArray().put(JSONObject().put("text", fallbackText)))
+            }
+            throw AiException("letter_layout_empty", "The AI returned no readable letter text. Please retry or use Recognized Text.")
+        }
+        return layout
     }
 
     private fun imageBody(jpeg: ByteArray, lang: String) = JSONObject()
