@@ -46,7 +46,7 @@ object Biometric {
         val p = BiometricPrompt(a, ContextCompat.getMainExecutor(a), object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { onOk() }
         })
-        p.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock ScanType").setNegativeButtonText("Use PIN")
+        p.authenticate(BiometricPrompt.PromptInfo.Builder().setTitle("Unlock Scanner.ai").setNegativeButtonText("Use PIN")
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK).build())
     }
 }
@@ -57,9 +57,9 @@ fun LockScreen(prefs: Prefs, activity: FragmentActivity, onUnlock: () -> Unit) {
     var err by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (prefs.lockBio) Biometric.prompt(activity, onUnlock) }
     Column(Modifier.fillMaxSize().padding(32.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-        Image(painterResource(R.drawable.scantype_logo), "ScanType", Modifier.size(72.dp).clip(RoundedCornerShape(18.dp)))
+        Image(painterResource(R.drawable.scantype_logo), "Scanner.ai", Modifier.size(72.dp).clip(RoundedCornerShape(18.dp)))
         Spacer(Modifier.height(16.dp))
-        Text("ScanType is locked", style = MaterialTheme.typography.titleLarge)
+        Text("Scanner.ai is locked", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(16.dp))
         OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(8); err = false }, singleLine = true, isError = err,
             label = { Text("PIN") }, visualTransformation = PasswordVisualTransformation(),

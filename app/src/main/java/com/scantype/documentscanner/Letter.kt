@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import org.json.JSONArray
@@ -94,30 +95,56 @@ object LetterAnalyzer {
         else -> "body"
     }
 
-    /** On-device fallback: real text blocks and their positions from ML Kit. Accuracy is limited, especially for handwriting. */
+    /**
+     * On-device fallback uses Latin and Devanagari OCR together. Duplicate overlapping
+     * blocks are filtered so English, Hindi and mixed-script letters have a better fallback.
+     * Handwritten recognition may still be limited without AI recognition.
+     */
     private suspend fun offline(ctx: Context, uri: Uri, page: Int, startId: Int): List<LBlock> {
         val bmp = ImageFilters.load(ctx, uri, 1600)
-        val w = bmp.width.toFloat(); val h = bmp.height.toFloat()
-        val res = TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build()).process(InputImage.fromBitmap(bmp, 0)).await()
+        val w = bmp.width.toFloat()
+        val h = bmp.height.toFloat()
+        val image = InputImage.fromBitmap(bmp, 0)
+        val latin = runCatching {
+            TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).process(image).await().textBlocks
+        }.getOrDefault(emptyList())
+        val devanagari = runCatching {
+            TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build()).process(image).await().textBlocks
+        }.getOrDefault(emptyList())
         bmp.recycle()
-        val out = ArrayList<LBlock>()
-        for (b in res.textBlocks) {
-            val box = b.boundingBox ?: continue
-            val t = b.lines.joinToString("\n") { it.text }.trim()
-            if (t.isEmpty()) continue
-            val x0 = box.left / w; val x1 = box.right / w
-            val center = (x0 + x1) / 2
-            val role = roleOf(t)
-            val align = when {
+        data class Candidate(val text: String, val left: Int, val top: Int, val right: Int, val bottom: Int)
+        val candidates = ArrayList<Candidate>()
+        for (blocks in listOf(latin, devanagari)) {
+            for (block in blocks) {
+                val box = block.boundingBox ?: continue
+                val text = block.lines.joinToString("\n") { it.text }.trim()
+                if (text.isBlank()) continue
+                val duplicate = candidates.any { c ->
+                    val ix = maxOf(0, minOf(c.right, box.right) - maxOf(c.left, box.left))
+                    val iy = maxOf(0, minOf(c.bottom, box.bottom) - maxOf(c.top, box.top))
+                    val intersection = ix.toFloat() * iy
+                    val areaA = maxOf(1, c.right - c.left).toFloat() * maxOf(1, c.bottom - c.top)
+                    val areaB = maxOf(1, box.width()).toFloat() * maxOf(1, box.height())
+                    intersection / (areaA + areaB - intersection).coerceAtLeast(1f) > 0.55f
+                }
+                if (!duplicate) candidates.add(Candidate(text, box.left, box.top, box.right, box.bottom))
+            }
+        }
+        return candidates.sortedWith(compareBy<Candidate>({ it.top }, { it.left })).mapIndexed { index, item ->
+            val x0 = (item.left / w).coerceIn(0f, 0.95f)
+            val x1 = (item.right / w).coerceIn(x0 + 0.05f, 1f)
+            val y0 = (item.top / h).coerceIn(0f, 0.98f)
+            val y1 = (item.bottom / h).coerceIn(y0 + 0.01f, 1f)
+            val center = (x0 + x1) / 2f
+            val role = roleOf(item.text)
+            val alignment = when {
                 role == "closing" || role == "date" || x0 > 0.55f -> DocAlign.RIGHT
                 kotlin.math.abs(center - 0.5f) < 0.05f && x1 - x0 < 0.6f -> DocAlign.CENTER
                 role == "body" && x1 - x0 > 0.55f -> DocAlign.JUSTIFY
                 else -> DocAlign.LEFT
             }
-            out.add(LBlock(startId + out.size, page, t, role, align, x0.coerceIn(0f, 0.95f), (box.top / h).coerceIn(0f, 0.98f),
-                x1.coerceIn(x0 + 0.05f, 1f), (box.bottom / h).coerceIn(0.01f, 1f), role == "subject"))
+            LBlock(startId + index, page, item.text, role, alignment, x0, y0, x1, y1, role == "subject")
         }
-        return out.sortedWith(compareBy({ it.y0 }, { it.x0 }))
     }
 
     private suspend fun ai(ctx: Context, prefs: Prefs, uri: Uri, page: Int, startId: Int): List<LBlock> {
@@ -130,23 +157,24 @@ object LetterAnalyzer {
     suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
         var useAi = prefs.aiReady
         var source = if (useAi) "AI" else "On-device"
-        var note = ""; var login = false
+        if (!prefs.signedIn) throw AiException("login_required", "Please sign in with Google to use Same-Layout Typed PDF.")
+        if (!prefs.aiReady) throw AiException("ai_disabled", "Enable AI recognition in Settings before creating a Same-Layout Typed PDF.")
         val all = ArrayList<LBlock>()
         for ((i, u) in uris.withIndex()) {
-            var got: List<LBlock>? = null
-            if (useAi) {
-                try { got = ai(ctx, prefs, u, i, all.size) }
-                catch (e: Exception) {
-                    useAi = false; source = "On-device"
-                    login = needsLogin(e)
-                    note = aiMessage(e) + " On-device recognition was used instead, so text and layout accuracy are limited."
-                }
+            val blocks = try {
+                ai(ctx, prefs, u, i, all.size)
+            } catch (e: Exception) {
+                // This feature promises AI layout reconstruction; do not substitute on-device OCR.
+                throw AiException(
+                    (e as? AiException)?.code ?: "letter_layout_failed",
+                    aiMessage(e).ifBlank { "AI could not reconstruct the page layout. Please retry." },
+                    (e as? AiException)?.resetsAt ?: 0L
+                )
             }
-            val list = if (got.isNullOrEmpty()) offline(ctx, u, i, all.size) else got
-            all.addAll(list)
+            if (blocks.isEmpty()) throw AiException("letter_layout_empty", "AI returned no readable text for this page. Retake it straight-on in bright light.")
+            all.addAll(blocks)
         }
-        if (!prefs.aiReady && note.isEmpty()) note = "AI is off, so on-device recognition was used. It is weak on handwriting: please check every block."
-        return LetterResult(all, source, note, login)
+        return LetterResult(all, "AI", "", false)
     }
 }
 
