@@ -204,24 +204,39 @@ object LetterAnalyzer {
     }
 
     suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
-        var useAi = prefs.aiReady
-        var source = if (useAi) "AI" else "On-device"
-        var note = ""; var login = false
+        val useAi = prefs.aiReady
+        val source = if (useAi) "AI" else "On-device"
+        var note = ""
+        var login = false
         val all = ArrayList<LBlock>()
+
         for ((i, u) in uris.withIndex()) {
-            var got: List<LBlock>? = null
-            if (useAi) {
-                try { got = ai(ctx, prefs, u, i, all.size) }
-                catch (e: Exception) {
-                    useAi = false; source = "On-device"
+            val list: List<LBlock> = if (useAi) {
+                try {
+                    val recognized = ai(ctx, prefs, u, i, all.size)
+                    if (recognized.isEmpty()) {
+                        // Do not silently fall back: the result must be shown as a real AI failure
+                        // so the user knows that manual checking or a clearer image is needed.
+                        note = "AI returned no readable text for page ${i + 1}. Retake the photo or use on-device recognition explicitly."
+                        emptyList()
+                    } else recognized
+                } catch (e: Exception) {
                     login = needsLogin(e)
-                    note = aiMessage(e) + " On-device recognition was used instead, so text and layout accuracy are limited."
+                    note = aiMessage(e) + " Page ${i + 1} was not converted by AI. The original photo is preserved; retry AI or select on-device recognition."
+                    emptyList()
+                }
+            } else {
+                runCatching { offline(ctx, u, i, all.size) }.getOrElse {
+                    note = "On-device recognition failed on page ${i + 1}. The original photo is preserved; try a clearer image."
+                    emptyList()
                 }
             }
-            val list = if (got.isNullOrEmpty()) offline(ctx, u, i, all.size) else got
             all.addAll(list)
         }
-        if (!prefs.aiReady && note.isEmpty()) note = "AI is off, so on-device recognition was used. It is weak on handwriting: please check every block."
+
+        if (!prefs.aiReady && note.isEmpty()) {
+            note = "AI is off. On-device recognition was used; handwriting accuracy may be limited. Please review every block."
+        }
         return LetterResult(all, source, note, login)
     }
 }
