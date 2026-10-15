@@ -124,9 +124,16 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
 
     LaunchedEffect(s.images.map { it.toString() }, prefs.signedIn, prefs.aiReady) {
         val key = s.images.joinToString("|") { it.toString() }
-        if (key.isNotBlank() && key != lastAutoKey && prefs.signedIn && prefs.aiReady && working == null) {
+        if (key.isNotBlank() && key != lastAutoKey && working == null) {
             lastAutoKey = key
-            runRecognition()
+            if (!prefs.signedIn) {
+                onAccount()
+            } else if (!prefs.aiReady) {
+                s.note = "AI recognition is turned off. Enable AI in Settings to create a Same-Layout Typed PDF."
+                say(s.note)
+            } else {
+                runRecognition()
+            }
         }
     }
 
