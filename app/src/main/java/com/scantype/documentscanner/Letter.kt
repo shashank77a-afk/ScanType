@@ -62,23 +62,99 @@ private const val LAYOUT_PROMPT =
 object LetterAnalyzer {
     private fun alignOf(s: String) = when (s) { "center" -> DocAlign.CENTER; "right" -> DocAlign.RIGHT; "justify" -> DocAlign.JUSTIFY; else -> DocAlign.LEFT }
 
+    /**
+     * Parses model layout conservatively. Accept the documented schema plus common alternate
+     * block containers used by older Worker versions, but reject invalid geometry instead of
+     * silently creating squeezed/overlapping blocks.
+     */
     fun parse(layout: JSONObject, page: Int, startId: Int): List<LBlock> {
-        val arr = layout.optJSONArray("blocks") ?: JSONArray()
+        val arr = layout.optJSONArray("blocks")
+            ?: layout.optJSONArray("elements")
+            ?: layout.optJSONArray("paragraphs")
+            ?: layout.optJSONArray("items")
+            ?: layout.optJSONArray("lines")
         val out = ArrayList<LBlock>()
         var cursor = 0.08f
-        for (i in 0 until arr.length()) {
-            val b = arr.optJSONObject(i) ?: continue
-            val t = b.optString("text").trim()
-            if (t.isEmpty()) continue
-            val box = b.optJSONArray("box")
-            var x0 = 0.1f; var y0 = cursor; var x1 = 0.9f; var y1 = cursor + 0.05f
-            if (box != null && box.length() == 4) {
-                x0 = (box.optDouble(0) / 1000).toFloat().coerceIn(0f, 0.95f)
-                y0 = (box.optDouble(1) / 1000).toFloat().coerceIn(0f, 0.98f)
-                x1 = (box.optDouble(2) / 1000).toFloat().coerceIn(x0 + 0.05f, 1f)
-                y1 = (box.optDouble(3) / 1000).toFloat().coerceIn(y0 + 0.01f, 1f)
-            } else cursor = y1 + 0.02f
-            out.add(LBlock(startId + out.size, page, t, b.optString("role", "body"), alignOf(b.optString("align")), x0, y0, x1, y1, b.optBoolean("bold")))
+
+        fun readText(b: JSONObject): String {
+            val candidates = listOf("text", "content", "value", "recognizedText", "description")
+            return candidates.asSequence()
+                .map { b.optString(it, "").trim() }
+                .firstOrNull { it.isNotEmpty() && it != "null" } ?: ""
+        }
+
+        fun readBox(b: JSONObject): JSONArray? {
+            val direct = b.optJSONArray("box") ?: b.optJSONArray("bbox") ?: b.optJSONArray("bounds")
+            if (direct != null && direct.length() == 4) return direct
+            val x = b.optDouble("x", Double.NaN)
+            val y = b.optDouble("y", Double.NaN)
+            val w = b.optDouble("width", Double.NaN)
+            val h = b.optDouble("height", Double.NaN)
+            if (listOf(x, y, w, h).all { it.isFinite() } && w > 0 && h > 0) {
+                return JSONArray().put(x).put(y).put(x + w).put(y + h)
+            }
+            return null
+        }
+
+        val candidates = if (arr != null) {
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+        } else if (readText(layout).isNotEmpty()) {
+            listOf(layout)
+        } else emptyList()
+
+        for (b in candidates) {
+            val t = readText(b)
+            if (t.isBlank()) continue
+            val box = readBox(b)
+            var x0 = 0.10f
+            var y0 = cursor
+            var x1 = 0.90f
+            var y1 = (cursor + 0.06f).coerceAtMost(0.96f)
+
+            if (box != null) {
+                val raw = (0..3).map { box.optDouble(it, Double.NaN) }
+                if (raw.all { it.isFinite() }) {
+                    // Worker output is documented in 0..1000 page coordinates. Some model outputs
+                    // return 0..1 normalized coordinates; accept those too.
+                    val divisor = if (raw.maxOrNull()!! <= 1.0) 1.0 else 1000.0
+                    val bx0 = (raw[0] / divisor).toFloat()
+                    val by0 = (raw[1] / divisor).toFloat()
+                    val bx1 = (raw[2] / divisor).toFloat()
+                    val by1 = (raw[3] / divisor).toFloat()
+                    if (bx0 >= 0f && by0 >= 0f && bx1 <= 1f && by1 <= 1f && bx1 > bx0 && by1 > by0) {
+                        x0 = bx0
+                        y0 = by0
+                        x1 = bx1
+                        y1 = by1
+                        cursor = (y1 + 0.02f).coerceAtMost(0.96f)
+                    } else {
+                        // Ignore malformed geometry and stack this text in reading order.
+                        cursor = (y1 + 0.02f).coerceAtMost(0.96f)
+                    }
+                } else {
+                    cursor = (y1 + 0.02f).coerceAtMost(0.96f)
+                }
+            } else {
+                cursor = (y1 + 0.02f).coerceAtMost(0.96f)
+            }
+
+            val role = b.optString("role", "body").takeIf { it.isNotBlank() } ?: "body"
+            val align = alignOf(b.optString("align", "left"))
+            out.add(
+                LBlock(
+                    id = startId + out.size,
+                    page = page,
+                    text = t,
+                    role = role,
+                    align = align,
+                    x0 = x0,
+                    y0 = y0,
+                    x1 = x1,
+                    y1 = y1,
+                    bold = b.optBoolean("bold", false),
+                    fontSize = b.optDouble("fontSize", 0.0).toFloat().coerceIn(0f, 64f)
+                )
+            )
         }
         return out
     }
@@ -128,24 +204,39 @@ object LetterAnalyzer {
     }
 
     suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
-        var useAi = prefs.aiReady
-        var source = if (useAi) "AI" else "On-device"
-        var note = ""; var login = false
+        val useAi = prefs.aiReady
+        val source = if (useAi) "AI" else "On-device"
+        var note = ""
+        var login = false
         val all = ArrayList<LBlock>()
+
         for ((i, u) in uris.withIndex()) {
-            var got: List<LBlock>? = null
-            if (useAi) {
-                try { got = ai(ctx, prefs, u, i, all.size) }
-                catch (e: Exception) {
-                    useAi = false; source = "On-device"
+            val list: List<LBlock> = if (useAi) {
+                try {
+                    val recognized = ai(ctx, prefs, u, i, all.size)
+                    if (recognized.isEmpty()) {
+                        // Do not silently fall back: the result must be shown as a real AI failure
+                        // so the user knows that manual checking or a clearer image is needed.
+                        note = "AI returned no readable text for page ${i + 1}. Retake the photo or use on-device recognition explicitly."
+                        emptyList()
+                    } else recognized
+                } catch (e: Exception) {
                     login = needsLogin(e)
-                    note = aiMessage(e) + " On-device recognition was used instead, so text and layout accuracy are limited."
+                    note = aiMessage(e) + " Page ${i + 1} was not converted by AI. The original photo is preserved; retry AI or select on-device recognition."
+                    emptyList()
+                }
+            } else {
+                runCatching { offline(ctx, u, i, all.size) }.getOrElse {
+                    note = "On-device recognition failed on page ${i + 1}. The original photo is preserved; try a clearer image."
+                    emptyList()
                 }
             }
-            val list = if (got.isNullOrEmpty()) offline(ctx, u, i, all.size) else got
             all.addAll(list)
         }
-        if (!prefs.aiReady && note.isEmpty()) note = "AI is off, so on-device recognition was used. It is weak on handwriting: please check every block."
+
+        if (!prefs.aiReady && note.isEmpty()) {
+            note = "AI is off. On-device recognition was used; handwriting accuracy may be limited. Please review every block."
+        }
         return LetterResult(all, source, note, login)
     }
 }

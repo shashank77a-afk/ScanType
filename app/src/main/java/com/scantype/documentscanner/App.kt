@@ -502,9 +502,9 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "ScanType logo", Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)))
+                Image(painterResource(R.drawable.scanner_ai_icon), "Scanner.ai logo", Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)))
                 Spacer(Modifier.width(10.dp))
-                Text("ScanType", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                Text("Scanner.ai", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
                 IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
                 IconButton(onAccount) { Icon(Icons.Filled.AccountCircle, "Account") }
