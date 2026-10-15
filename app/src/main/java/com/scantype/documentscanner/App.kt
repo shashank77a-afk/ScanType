@@ -103,6 +103,10 @@ fun App(prefs: Prefs) {
 
     fun runOcr(uris: List<Uri>, handwriting: Boolean, forceOffline: Boolean = false) {
         val useAi = prefs.aiReady && !forceOffline
+        if (handwriting && !useAi) {
+            toast("Handwriting to Text is AI-only. Turn on AI recognition in Settings to continue.")
+            return
+        }
         if (!useAi && !Langs.offline(prefs.lang)) {
             toast("${Langs.label(prefs.lang)} needs AI recognition. Turn it on in Settings, or choose Hindi/English.")
             return
@@ -257,7 +261,7 @@ fun App(prefs: Prefs) {
             },
             dismissButton = {
                 Row {
-                    TextButton({ aiFail = null; runOcr(f.uris, f.handwriting, true) }) { Text("Use offline") }
+                    if (!f.handwriting) TextButton({ aiFail = null; runOcr(f.uris, false, true) }) { Text("Use offline") }
                     TextButton({ aiFail = null }) { Text("Cancel") }
                 }
             })
@@ -585,14 +589,8 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         if (!selecting) item { DashboardSectionTitle("AI Tools", "Recognize, review and recreate documents") }
         if (!selecting) item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("Handwriting to Text", "हस्तलिखित को typed text में बदलें", Icons.Filled.Psychology, Color(0xFFE8F2FF), Color(0xFF3169D8), Modifier.weight(1f), onHand)
-                DashboardToolCard("OCR Text Review", "पहचाने गए टेक्स्ट को जाँचें", Icons.Filled.Article, Color(0xFFF0E9FF), Color(0xFF8250C8), Modifier.weight(1f), onText)
-            }
-        }
-        if (!selecting) item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("Same-Layout Typed PDF", "फोटो चुनें → सीधे typed PDF", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), onSmartPdf)
-                DashboardToolCard("Hindi + English OCR", "दोनों भाषाओं में text पहचानें", Icons.Filled.Translate, Color(0xFFFFF0E5), Color(0xFFC66A2B), Modifier.weight(1f), onText)
+                DashboardToolCard("Handwriting to Text", "हस्तलिखित को AI से editable text में बदलें", Icons.Filled.Psychology, Color(0xFFE8F2FF), Color(0xFF3169D8), Modifier.weight(1f), onHand)
+                DashboardToolCard("Same-Layout Typed PDF", "AI से layout बचाकर typed PDF बनाएँ", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), onSmartPdf)
             }
         }
         if (!selecting) item { DashboardSectionTitle("Non-AI Tools", "Essential document tools that work locally") }
