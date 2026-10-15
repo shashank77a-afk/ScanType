@@ -78,6 +78,16 @@ fun App(prefs: Prefs) {
     var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
     var showAccount by remember { mutableStateOf(false) }
+    var pendingAi by remember { mutableStateOf<(() -> Unit)?>(null) }
+    fun requestAi(action: () -> Unit) {
+        if (!prefs.signedIn) { pendingAi = action; showAccount = true } else action()
+    }
+    fun finishSignIn() {
+        val action = pendingAi
+        pendingAi = null
+        showAccount = false
+        action?.invoke()
+    }
     var letter by remember { mutableStateOf<LetterState?>(null) }
     var letterTarget by remember { mutableStateOf(false) }
     var letterCropIdx by remember { mutableStateOf<Int?>(null) }
@@ -168,7 +178,11 @@ fun App(prefs: Prefs) {
     val pickIdImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> if (u != null) idCropUri = u }
     val imageOnly = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
 
-    fun openCam(m: CamMode) { if (m == CamMode.HAND && !prefs.aiReady) aiHint = true else camMode = m }
+    fun openCam(m: CamMode) {
+        if (m == CamMode.HAND || m == CamMode.TEXT) requestAi {
+            if (!prefs.aiReady) aiHint = true else camMode = m
+        } else camMode = m
+    }
 
     fun onCaptured(uris: List<Uri>, m: CamMode) {
         camMode = null
@@ -250,7 +264,7 @@ fun App(prefs: Prefs) {
     }
     if (showAccount) {
         BackHandler { showAccount = false }
-        AccountScreen(prefs, snack, scope) { showAccount = false }
+        AccountScreen(prefs, snack, scope, onSignedIn = { finishSignIn() }) { showAccount = false }
         return
     }
     val ts = toolStart
@@ -394,8 +408,8 @@ fun App(prefs: Prefs) {
             when (tab) {
                 0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
-                    { openCam(CamMode.HAND) }, { openCam(CamMode.TEXT) }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
-                    { openCam(CamMode.DOCS) }, { letter = LetterState() }, { tab = 1 }, { openCam(CamMode.QR) })
+                    { requestAi { openCam(CamMode.HAND) } }, { requestAi { openCam(CamMode.TEXT) } }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
+                    { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 1 }, { openCam(CamMode.QR) })
                 else -> ToolsScreen(sections)
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
