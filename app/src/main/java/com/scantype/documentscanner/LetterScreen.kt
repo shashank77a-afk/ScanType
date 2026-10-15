@@ -118,24 +118,16 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
-    LaunchedEffect(s.images.map { it.toString() }, prefs.signedIn, prefs.aiReady) {
+    LaunchedEffect(s.images.map { it.toString() }) {
         val key = s.images.joinToString("|") { it.toString() }
         if (key.isNotBlank() && key != lastAutoKey && working == null) {
             lastAutoKey = key
-            if (!prefs.signedIn) {
-                onAccount()
-            } else if (!prefs.aiReady) {
-                s.note = "AI recognition is turned off. Enable AI in Settings to create a Same-Layout Typed PDF."
-                say(s.note)
-            } else {
-                runRecognition()
-            }
+            runRecognition(false)
         }
     }
 
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
-        if (!prefs.signedIn) { onAccount(); return }
         runRecognition(false)
     }
 
@@ -318,19 +310,6 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 }
             }
         }
-    }
-    if (showAiHint) {
-        AlertDialog(
-            onDismissRequest = { showAiHint = false },
-            title = { Text("Enable AI for better layout matching?") },
-            text = { Text("AI is currently off. Turn on AI in Settings before using Same-Layout Typed PDF. No offline PDF will be created because it may not preserve the handwriting or layout.") },
-            confirmButton = {
-                TextButton(onClick = { showAiHint = false; onSettings() }) { Text("Open Settings") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAiHint = false }) { Text("Cancel") }
-            }
-        )
     }
 }
 
