@@ -72,12 +72,12 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
     val defaultBackendUrl = "https://scantype-api.scantype.workers.dev"
     val defaultGoogleWebClientId = "374340878770-ggk3oif0h68vmv3mpteeidpoa87lqak2.apps.googleusercontent.com"
 
-    // Keep the displayed values and the values used by the sign-in request in sync.
-    if (prefs.backendUrl != defaultBackendUrl) prefs.backendUrl = defaultBackendUrl
-    if (prefs.googleClientId != defaultGoogleWebClientId) prefs.googleClientId = defaultGoogleWebClientId
+    // Preserve saved deployment/OAuth values. Only supply defaults when none have ever been saved.
+    if (prefs.backendUrl.isBlank()) prefs.backendUrl = defaultBackendUrl
+    if (prefs.googleClientId.isBlank()) prefs.googleClientId = defaultGoogleWebClientId
 
-    var url by remember { mutableStateOf(defaultBackendUrl) }
-    var cid by remember { mutableStateOf(defaultGoogleWebClientId) }
+    var url by remember { mutableStateOf(prefs.backendUrl.ifBlank { defaultBackendUrl }) }
+    var cid by remember { mutableStateOf(prefs.googleClientId.ifBlank { defaultGoogleWebClientId }) }
     var working by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf("") }
