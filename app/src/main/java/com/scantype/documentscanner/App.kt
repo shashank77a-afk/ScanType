@@ -591,7 +591,7 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         }
         if (!selecting) item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("Same-Layout Typed PDF", "फोटो चुनें → सीधे typed PDF", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), { requestAi(onSmartPdf) })
+                DashboardToolCard("Same-Layout Typed PDF", "फोटो चुनें → सीधे typed PDF", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), onSmartPdf)
                 DashboardToolCard("Hindi + English OCR", "दोनों भाषाओं में text पहचानें", Icons.Filled.Translate, Color(0xFFFFF0E5), Color(0xFFC66A2B), Modifier.weight(1f), onText)
             }
         }
