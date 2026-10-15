@@ -80,32 +80,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                     step = 0
                     say(r.note.ifBlank { "No readable text was found. Try a brighter, straight-on photo." })
                 } else {
-                    if (!prefs.signedIn || !prefs.aiReady) {
-                        step = 1
-                    } else {
-                        working = "Creating typed PDF…"
-                        val outputName = "Typed_" + stamp()
-                        val saved = withContext(Dispatchers.IO) {
-                            runCatching {
-                                val f = store.newFileExt(outputName, "pdf")
-                                LayoutPdf.render(r.blocks, LetterOpts(), f)
-                                runCatching { store.sidecar(f).writeText(r.blocks.joinToString("\n\n") { it.text }) }
-                                f
-                            }.getOrNull()
-                        }
-                        working = null
-                        if (saved != null) {
-                            val view = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                                .setDataAndType(store.uri(saved), "application/pdf")
-                                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            val opened = runCatching { ctx.startActivity(view) }.isSuccess
-                            if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
-                            onSaved()
-                        } else {
-                            say("Could not create the PDF. Please retry with a clearer image.")
-                            step = 0
-                        }
-                    }
+                    step = 1
                 }
             }.onFailure {
                 s.note = "Recognition failed. Check your internet/AI settings, or try a clearer photo."
@@ -117,7 +92,6 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
 
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
-        if (!prefs.signedIn) { onAccount(); return }
         if (!prefs.aiReady) showAiHint = true else runRecognition()
     }
 
