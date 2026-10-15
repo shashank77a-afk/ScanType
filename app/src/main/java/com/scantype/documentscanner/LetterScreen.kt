@@ -48,10 +48,11 @@ private fun Chips(vararg items: Pair<String, Boolean>, onPick: (Int) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
-                 onBack: () -> Unit, onAddCamera: () -> Unit, onCrop: (Int) -> Unit, onAccount: () -> Unit, onSaved: () -> Unit) {
+                 onBack: () -> Unit, onAddCamera: () -> Unit, onCrop: (Int) -> Unit, onAccount: () -> Unit, onSettings: () -> Unit, onSaved: () -> Unit) {
     val ctx = LocalContext.current
     var step by remember { mutableIntStateOf(0) }
     var working by remember { mutableStateOf<String?>(null) }
+    var showAiHint by remember { mutableStateOf(false) }
     var opts by remember { mutableStateOf(LetterOpts()) }
     var name by remember { mutableStateOf("Letter_" + stamp()) }
     var open by remember { mutableIntStateOf(-1) }
@@ -66,18 +67,32 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
-    fun recognize() {
-        if (s.images.isEmpty()) return
+    fun runRecognition() {
+        if (s.images.isEmpty() || working != null) return
         scope.launch {
-            working = "Reading the letter and its layout…"
+            working = "Reading text and reconstructing the layout…"
             val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList()) }
             working = null
             res.onSuccess { r ->
                 s.blocks.clear(); s.blocks.addAll(r.blocks)
                 s.original = r.blocks; s.source = r.source; s.note = r.note; s.needLogin = r.needLogin
-                if (r.blocks.isEmpty()) say("No text was found. Please retake the photo in better light.") else step = 1
-            }.onFailure { say("We couldn't read this letter. Please try again with a clearer photo.") }
+                if (r.blocks.isEmpty()) {
+                    step = 0
+                    say(r.note.ifBlank { "No readable text was found. Try a brighter, straight-on photo." })
+                } else {
+                    step = 1
+                }
+            }.onFailure {
+                s.note = "Recognition failed. Check your internet/AI settings, or try a clearer photo."
+                step = 0
+                say(s.note)
+            }
         }
+    }
+
+    fun recognize() {
+        if (s.images.isEmpty() || working != null) return
+        if (!prefs.aiReady) showAiHint = true else runRecognition()
     }
 
     fun render(f: File): LayoutReport = if (opts.clean) LayoutPdf.clean(s.blocks.toList(), opts, f) else LayoutPdf.render(s.blocks.toList(), opts, f)
@@ -102,6 +117,19 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Take a clear photo of the full letter page, or choose one from the gallery. Keep all page edges visible and avoid perspective tilt so the layout can be rebuilt.")
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (prefs.aiReady) "AI layout recognition is enabled" else "AI layout recognition is off",
+                                style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                if (prefs.aiReady) "The app will use AI to identify Hindi/English text blocks and their positions. Review the result before saving."
+                                else "Without AI, on-device OCR may miss Hindi handwriting and page positions. Enable AI for the best chance of matching the original layout, or continue offline and correct the text manually.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            if (!prefs.aiReady) TextButton(onSettings) { Text("Open AI Settings") }
+                        }
+                    }
+                    if (s.note.isNotEmpty()) Text(s.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onAddCamera, Modifier.weight(1f)) { Text("Camera") }
                         OutlinedButton({ pickG.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(1f)) { Text("Gallery") }
@@ -250,6 +278,19 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 }
             }
         }
+    }
+    if (showAiHint) {
+        AlertDialog(
+            onDismissRequest = { showAiHint = false },
+            title = { Text("Enable AI for better layout matching?") },
+            text = { Text("AI is currently off. On-device OCR can be unreliable on handwritten Hindi letters, so the generated PDF may not preserve the original layout. Open Settings to enable AI, or continue with on-device recognition and review every text block.") },
+            confirmButton = {
+                TextButton(onClick = { showAiHint = false; onSettings() }) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAiHint = false; runRecognition() }) { Text("Continue offline") }
+            }
+        )
     }
 }
 
