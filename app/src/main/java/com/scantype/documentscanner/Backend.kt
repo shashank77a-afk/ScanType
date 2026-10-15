@@ -150,7 +150,17 @@ object Backend {
         refreshIfNeeded(prefs)
         val r = call(prefs, "POST", "/api/ai/letter-layout", imageBody(jpeg, lang), true)
         r.optJSONObject("usage")?.let { prefs.applyUsage(it) }
-        return r.getJSONObject("layout")
+        val layout = r.optJSONObject("layout")
+            ?: throw AiException("letter_layout_invalid", "The AI server did not return a valid layout object. Please retry.")
+        val blocks = layout.optJSONArray("blocks")
+            ?: layout.optJSONArray("elements")
+            ?: layout.optJSONArray("paragraphs")
+            ?: layout.optJSONArray("items")
+            ?: layout.optJSONArray("lines")
+        if (blocks == null || blocks.length() == 0) {
+            throw AiException("letter_layout_empty", "The AI returned no layout blocks. Retake the photo or use Recognized Text instead.")
+        }
+        return layout
     }
 
     private fun imageBody(jpeg: ByteArray, lang: String) = JSONObject()
