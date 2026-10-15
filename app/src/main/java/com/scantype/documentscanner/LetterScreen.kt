@@ -51,6 +51,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                  onBack: () -> Unit, onAddCamera: () -> Unit, onCrop: (Int) -> Unit, onAccount: () -> Unit, onSettings: () -> Unit, onSaved: () -> Unit) {
     val ctx = LocalContext.current
     var step by remember { mutableIntStateOf(0) }
+    var showFailureDetails by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf<String?>(null) }
     var showAiHint by remember { mutableStateOf(false) }
     var opts by remember { mutableStateOf(LetterOpts()) }
@@ -79,40 +80,42 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 s.original = r.blocks; s.source = r.source; s.note = r.note; s.needLogin = r.needLogin
                 if (r.blocks.isEmpty()) {
                     step = 0
-                    say(r.note.ifBlank { "No readable text was found. Try a brighter, straight-on photo." })
+                    say(r.note.ifBlank { "No readable text was found. Retake the page straight-on in bright light." })
                 } else if (r.source != "AI") {
+                    // Same-layout output must come from the AI layout service; offline OCR is not an equivalent result.
                     step = 0
-                    say("AI layout recognition failed. Check your connection and try again with a clearer image. No PDF was created from the offline fallback.")
+                    s.note = r.note.ifBlank { "AI layout recognition failed. Check your connection and try again." }
+                    say(s.note)
                 } else {
-                    if (!prefs.signedIn || !prefs.aiReady) {
-                        step = 1
+                    working = "Creating typed PDF…"
+                    val saved = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val f = store.newFileExt("Typed_" + stamp(), "pdf")
+                            val report = LayoutPdf.render(r.blocks, LetterOpts(), f)
+                            if (!f.isFile || f.length() <= 100L || report.pages < 1) {
+                                f.delete()
+                                throw IllegalStateException("The PDF was empty.")
+                            }
+                            store.sidecar(f).writeText(r.blocks.joinToString("\n\n") { it.text })
+                            f
+                        }.getOrNull()
+                    }
+                    working = null
+                    if (saved != null) {
+                        val view = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                            .setDataAndType(store.uri(saved), "application/pdf")
+                            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        val opened = runCatching { ctx.startActivity(view) }.isSuccess
+                        if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
+                        onSaved()
                     } else {
-                        working = "Creating typed PDF…"
-                        val outputName = "Typed_" + stamp()
-                        val saved = withContext(Dispatchers.IO) {
-                            runCatching {
-                                val f = store.newFileExt(outputName, "pdf")
-                                LayoutPdf.render(r.blocks, LetterOpts(), f)
-                                runCatching { store.sidecar(f).writeText(r.blocks.joinToString("\n\n") { it.text }) }
-                                f
-                            }.getOrNull()
-                        }
-                        working = null
-                        if (saved != null) {
-                            val view = android.content.Intent(android.content.Intent.ACTION_VIEW)
-                                .setDataAndType(store.uri(saved), "application/pdf")
-                                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            val opened = runCatching { ctx.startActivity(view) }.isSuccess
-                            if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
-                            onSaved()
-                        } else {
-                            say("Could not create the PDF. Please retry with a clearer image.")
-                            step = 0
-                        }
+                        step = 0
+                        s.note = "Could not create a valid PDF. Please try again with a clearer image."
+                        say(s.note)
                     }
                 }
-            }.onFailure {
-                s.note = "Recognition failed. Check your internet/AI settings, or try a clearer photo."
+            }.onFailure { e ->
+                s.note = e.message?.takeIf { it.isNotBlank() } ?: "AI recognition failed. Check your internet connection and try again."
                 step = 0
                 say(s.note)
             }
