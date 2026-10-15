@@ -79,6 +79,9 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 if (r.blocks.isEmpty()) {
                     step = 0
                     say(r.note.ifBlank { "No readable text was found. Try a brighter, straight-on photo." })
+                } else if (r.source != "AI") {
+                    step = 0
+                    say("AI layout recognition failed. Check your connection and try again with a clearer image. No PDF was created from the offline fallback.")
                 } else {
                     if (!prefs.signedIn || !prefs.aiReady) {
                         step = 1
