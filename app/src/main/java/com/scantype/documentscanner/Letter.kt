@@ -218,36 +218,54 @@ object LetterAnalyzer {
         }
     }
 
-    private suspend fun ai(ctx: Context, prefs: Prefs, uri: Uri, page: Int, startId: Int): List<LBlock> {
+    /**
+     * Hybrid path: local OCR and local rule-based layout run first. Gemini is only an
+     * optional rescue path when local OCR returns no usable text or a very small result.
+     * PDF rendering never calls AI.
+     */
+    private suspend fun aiFallback(ctx: Context, prefs: Prefs, uri: Uri, page: Int, startId: Int): List<LBlock> {
         val jpeg = jpegBytes(ctx, uri)
-        val layout = if (prefs.aiViaBackend) Backend.letterLayout(prefs, jpeg, prefs.lang)
-        else JSONObject(geminiDirect(prefs, LAYOUT_PROMPT + langNote(prefs.lang), jpeg, true))
-        return parse(layout, page, startId)
+        val text = if (prefs.aiViaBackend) {
+            Backend.ocr(prefs, jpeg, prefs.lang)
+        } else {
+            geminiDirect(prefs, "Transcribe the readable Hindi and English text from this document exactly. Preserve paragraph breaks. Do not summarize or invent words.", jpeg, false)
+        }
+        return text.lines().map { it.trim() }.filter { it.isNotEmpty() }.mapIndexed { index, line ->
+            val y0 = (0.06f + index * 0.045f).coerceAtMost(0.94f)
+            LBlock(startId + index, page, line, roleOf(line), DocAlign.LEFT, 0.10f, y0, 0.90f, (y0 + 0.035f).coerceAtMost(0.99f))
+        }
     }
 
-    suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
-        var useAi = prefs.aiReady
-        var source = if (useAi) "AI" else "On-device"
-        if (!prefs.signedIn) throw AiException("login_required", "Please sign in with Google to use Same-Layout Typed PDF.")
-        if (!prefs.aiReady) throw AiException("ai_disabled", "Enable AI recognition in Settings before creating a Same-Layout Typed PDF.")
-        val all = ArrayList<LBlock>()
-        for ((i, u) in uris.withIndex()) {
-            val blocks = try {
-                ai(ctx, prefs, u, i, all.size)
-            } catch (e: Exception) {
-                // This feature promises AI layout reconstruction; do not substitute on-device OCR.
-                throw AiException(
-                    (e as? AiException)?.code ?: "letter_layout_failed",
-                    aiMessage(e).ifBlank { "AI could not reconstruct the page layout. Please retry." },
-                    (e as? AiException)?.resetsAt ?: 0L
-                )
-            }
-            if (blocks.isEmpty()) throw AiException("letter_layout_empty", "AI returned no readable text for this page. Retake it straight-on in bright light.")
-            all.addAll(blocks)
-        }
-        return LetterResult(all, "AI", "", false)
+    private fun isWeakLocalResult(blocks: List<LBlock>, uri: Uri): Boolean {
+        val chars = blocks.sumOf { it.text.count(Char::isLetterOrDigit) }
+        // Use conservative signals only. Weak local text prompts optional AI; it doesn't silently upload.
+        return blocks.isEmpty() || chars < 24
     }
-}
+
+    suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>, allowAiFallback: Boolean = false): LetterResult {
+        val all = ArrayList<LBlock>()
+        var source = "On-device OCR"
+        var note = ""
+        for ((i, uri) in uris.withIndex()) {
+            val local = runCatching { offline(ctx, uri, i, all.size) }.getOrDefault(emptyList())
+            val weak = isWeakLocalResult(local, uri)
+            val chosen = if (weak && allowAiFallback && prefs.aiReady && prefs.signedIn) {
+                runCatching { aiFallback(ctx, prefs, uri, i, all.size) }.getOrElse { e ->
+                    note = "Local OCR was used because AI fallback failed: ${aiMessage(e)}"
+                    local
+                }.also { if (it.isNotEmpty()) source = "AI fallback" }
+            } else {
+                if (weak) note = "Local OCR may have missed handwritten words. Review the text, or choose AI fallback if you want."
+                local
+            }
+            if (chosen.isEmpty()) {
+                throw AiException("ocr_no_text", "No text was detected locally. Improve the crop/lighting and retry, or enable optional AI fallback.")
+            }
+            all.addAll(chosen)
+        }
+        return LetterResult(all, source, note, false)
+    }
+
 
 /** Rebuilds the letter as a real-text PDF with every block placed where it was on the original page. */
 object LayoutPdf {
