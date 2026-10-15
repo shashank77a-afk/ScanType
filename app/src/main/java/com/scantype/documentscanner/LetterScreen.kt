@@ -69,25 +69,20 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
-    fun runRecognition() {
+    fun runRecognition(allowAiFallback: Boolean = false) {
         if (s.images.isEmpty() || working != null) return
         scope.launch {
-            working = "Reading text and reconstructing the layout…"
-            val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList()) }
+            working = "Reading text on this device…"
+            val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList(), allowAiFallback) }
             working = null
             res.onSuccess { r ->
                 s.blocks.clear(); s.blocks.addAll(r.blocks)
                 s.original = r.blocks; s.source = r.source; s.note = r.note; s.needLogin = r.needLogin
                 if (r.blocks.isEmpty()) {
                     step = 0
-                    say(r.note.ifBlank { "No readable text was found. Retake the page straight-on in bright light." })
-                } else if (r.source != "AI") {
-                    // Same-layout output must come from the AI layout service; offline OCR is not an equivalent result.
-                    step = 0
-                    s.note = r.note.ifBlank { "AI layout recognition failed. Check your connection and try again." }
-                    say(s.note)
+                    say(r.note.ifBlank { "No readable text was found. Improve the crop or lighting and retry." })
                 } else {
-                    working = "Creating typed PDF…"
+                    working = "Creating typed PDF locally…"
                     val saved = withContext(Dispatchers.IO) {
                         runCatching {
                             val f = store.newFileExt("Typed_" + stamp(), "pdf")
@@ -107,15 +102,16 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         val opened = runCatching { ctx.startActivity(view) }.isSuccess
                         if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
+                        if (r.note.isNotBlank()) say(r.note)
                         onSaved()
                     } else {
                         step = 0
-                        s.note = "Could not create a valid PDF. Please try again with a clearer image."
+                        s.note = "Could not create a valid PDF. Please try again."
                         say(s.note)
                     }
                 }
             }.onFailure { e ->
-                s.note = e.message?.takeIf { it.isNotBlank() } ?: "AI recognition failed. Check your internet connection and try again."
+                s.note = e.message?.takeIf { it.isNotBlank() } ?: "Text recognition failed. Please retry."
                 step = 0
                 say(s.note)
             }
@@ -140,7 +136,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
         if (!prefs.signedIn) { onAccount(); return }
-        if (!prefs.aiReady) showAiHint = true else runRecognition()
+        runRecognition(false)
     }
 
     fun render(f: File): LayoutReport = if (opts.clean) LayoutPdf.clean(s.blocks.toList(), opts, f) else LayoutPdf.render(s.blocks.toList(), opts, f)
@@ -160,10 +156,10 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Handwriting photo चुनें या Camera से लें। इसके बाद AI अपने-आप typed PDF बनाएगा और खोल देगा। कोई layout setting नहीं चुननी पड़ेगी.")
+                    Text("Photo चुनें या Camera से लें। टेक्स्ट पहचानना, layout बनाना और PDF तैयार करना फोन पर होगा। कठिन handwriting के लिए चाहें तो AI fallback चुन सकते हैं.")
                     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(if (prefs.aiReady) "AI layout recognition is enabled" else "AI layout recognition is off",
+                            Text("Local OCR and PDF engine are enabled",
                                 style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             Text(
                                 if (prefs.aiReady) "Photo चुनते ही text और layout पहचाना जाएगा, PDF बनेगा और खुलेगा."
@@ -187,7 +183,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                         }
                     }
                     if (s.images.isNotEmpty() && working == null) {
-                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry PDF creation") }
+                        OutlinedButton({ lastAutoKey = ""; runRecognition(false) }, Modifier.fillMaxWidth()) { Text("Retry offline PDF creation") }\n                        OutlinedButton({ if (!prefs.signedIn) onAccount() else if (!prefs.aiReady) onSettings() else runRecognition(true) }, Modifier.fillMaxWidth()) { Text("Try AI fallback for difficult handwriting (optional)") }
                     }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
