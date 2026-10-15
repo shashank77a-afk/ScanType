@@ -264,7 +264,7 @@ object LetterAnalyzer {
         }
         return LetterResult(all, source, note, false)
     }
-
+}
 
 /** Rebuilds the letter as a real-text PDF with every block placed where it was on the original page. */
 object LayoutPdf {
