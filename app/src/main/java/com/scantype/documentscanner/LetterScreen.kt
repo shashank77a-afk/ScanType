@@ -312,12 +312,12 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         AlertDialog(
             onDismissRequest = { showAiHint = false },
             title = { Text("Enable AI for better layout matching?") },
-            text = { Text("AI is currently off. On-device OCR can be unreliable on handwritten Hindi letters, so the generated PDF may not preserve the original layout. Open Settings to enable AI, or continue with on-device recognition and review every text block.") },
+            text = { Text("AI is currently off. Turn on AI in Settings before using Same-Layout Typed PDF. No offline PDF will be created because it may not preserve the handwriting or layout.") },
             confirmButton = {
                 TextButton(onClick = { showAiHint = false; onSettings() }) { Text("Open Settings") }
             },
             dismissButton = {
-                TextButton(onClick = { showAiHint = false; runRecognition() }) { Text("Continue offline") }
+                TextButton(onClick = { showAiHint = false }) { Text("Cancel") }
             }
         )
     }
