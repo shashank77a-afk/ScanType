@@ -67,7 +67,7 @@ class Prefs(ctx: Context) {
         get() = sp.getString("api_key", "") ?: ""
         set(v) { sp.edit().putString("api_key", v.trim()).apply() }
     var model: String
-        get() = sp.getString("model", "gemini-3.8-flash") ?: "gemini-3.8-flash"
+        get() = sp.getString("model", "gemini-3.5-flash") ?: "gemini-3.5-flash"
         set(v) { sp.edit().putString("model", v.trim()).apply() }
     var backendUrl: String
         get() = sp.getString("backend_url", BuildConfig.BACKEND_URL) ?: ""
