@@ -53,12 +53,12 @@ class LetterResult(val blocks: List<LBlock>, val source: String, val note: Strin
 class LayoutReport(val notes: List<String>, val pages: Int)
 
 private const val LAYOUT_PROMPT =
-    "Analyze this photo of a letter (Hindi or English, handwritten or printed) and return its text together with its page layout as JSON:\n" +
-    "{\"language\":\"hi|en|mixed\",\"pageAspect\":<page width divided by page height>,\"blocks\":[{\"text\":\"...\",\"role\":\"recipient|reference|date|subject|salutation|body|enclosure_heading|enclosure_item|closing|signature|other\",\"align\":\"left|center|right|justify\",\"box\":[x0,y0,x1,y1],\"bold\":false}]}\n" +
-    "box is the area of the block on the PAGE, from 0 to 1000, origin at the top-left corner of the page, x to the right, y downward.\n" +
-    "Rules: one block per paragraph or logical group (recipient and address together, one block per enclosure item, closing words, name and designation under the signature). Keep reading order top to bottom. " +
-    "Transcribe exactly as written: do not correct, translate or add any word, name, date, number or amount. Join lines that are only wrapped inside one paragraph; keep a line break only where the writer started a new line on purpose. " +
-    "If a word is unclear, write your best reading followed by [?]. Never invent text. Output only the JSON."
+    "You are a document-layout extraction engine. Inspect the provided photo of a handwritten or printed Hindi, English, or mixed-language official letter. Return one complete JSON object only.\n" +
+    "Schema: {\"language\":\"hi|en|mixed\",\"pageAspect\":0.707,\"blocks\":[{\"text\":\"exact visible text\",\"role\":\"recipient|reference|date|subject|salutation|body|enclosure_heading|enclosure_item|closing|signature|other\",\"align\":\"left|center|right|justify\",\"box\":[x0,y0,x1,y1],\"bold\":false}]}\n" +
+    "Coordinates are integers from 0 to 1000 relative to the full page, origin at top-left; box is [left,top,right,bottom]. pageAspect is page width divided by page height.\n" +
+    "Make one block per paragraph or logical group. Preserve headings, recipient, reference, date, subject, salutation, body paragraphs, enclosure list, closing, signature and designation. Keep reading order top-to-bottom. Transcribe faithfully; do not translate, correct spelling, summarize, or invent text. For unreadable words, use [?].\n" +
+    "Every block must have non-empty text. Use sensible positive boxes that do not exceed 1000. Do not include markdown fences, comments, or extra fields outside the JSON object. Keep the response concise enough to fit in one complete response.";
+
 
 object LetterAnalyzer {
     private fun alignOf(s: String) = when (s) { "center" -> DocAlign.CENTER; "right" -> DocAlign.RIGHT; "justify" -> DocAlign.JUSTIFY; else -> DocAlign.LEFT }
