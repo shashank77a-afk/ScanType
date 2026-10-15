@@ -55,7 +55,7 @@ object GoogleAuth {
     }.getOrDefault("unknown")
 
     fun message(e: Exception): String = when (e) {
-        is GetCredentialCancellationException -> "Sign-in did not complete. If you did not cancel it, the app signature (SHA-1) or the Google client ID is not set up correctly. See Sign-in help below."
+        is GetCredentialCancellationException -> "Sign-in did not complete. If you did not cancel it, the app signature (SHA-1) or the Google client ID is not set up correctly. open Advanced troubleshooting."
         is NoCredentialException -> "No Google account was found on this phone. Add a Google account in the phone Settings and try again."
         is GetCredentialException -> "Google sign-in failed. Please try again."
         is AiException -> if (e.code == "no_client") (e.message ?: "") else aiMessage(e)
@@ -65,7 +65,7 @@ object GoogleAuth {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, close: () -> Unit) {
+fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope, onSignedIn: () -> Unit = {}, close: () -> Unit) {
     val ctx = LocalContext.current
     val activity = ctx as Activity
     // Scanner.ai deployment defaults supplied by the app owner.
@@ -81,6 +81,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
     var working by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf("") }
+    var advanced by remember { mutableStateOf(false) }
     val sha1 = remember { GoogleAuth.apkSha1(ctx) }
     val usage = prefs.usage
     fun say(m: String) { scope.launch { snack.showSnackbar(m) } }
@@ -88,7 +89,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
     fun withGoogle(after: suspend (String) -> Unit) {
         scope.launch {
             working = true
-            try { after(GoogleAuth.idToken(activity, prefs.googleClientId)) }
+            try { after(GoogleAuth.idToken(activity, prefs.googleClientId)); if (prefs.signedIn) onSignedIn() }
             catch (e: Exception) { lastError = e::class.java.simpleName + ": " + (e.message ?: ""); say(GoogleAuth.message(e)) }
             finally { working = false }
         }
@@ -133,36 +134,34 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                 }
             }
             Card(shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Server settings", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(url, { url = it; prefs.backendUrl = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Server address (https://…workers.dev)") })
-                    OutlinedTextField(cid, { cid = it; prefs.googleClientId = it }, Modifier.fillMaxWidth(), singleLine = true,
-                        label = { Text("Google Web client ID") })
-                    Text("These are not secrets. The Gemini key stays only on your Cloudflare server.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            Card(shape = RoundedCornerShape(20.dp)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Sign-in help", style = MaterialTheme.typography.titleMedium)
-                    Text("Package name: ${ctx.packageName}", style = MaterialTheme.typography.bodySmall)
-                    Text("This APK's SHA-1:\n$sha1", style = MaterialTheme.typography.bodySmall)
-                    Text("Web client ID in use: " + (if (cid.isBlank()) "(empty)" else cid.take(12) + "…" + cid.takeLast(30)), style = MaterialTheme.typography.bodySmall)
-                    Text("In Google Cloud there must be an ANDROID client with exactly this package name and SHA-1, and the ID typed above must be a WEB APPLICATION client from the same project. Your Google account must be listed under Test users while the app is in Testing.",
-                        style = MaterialTheme.typography.bodySmall)
-                    if (lastError.isNotEmpty()) Text("Last error: $lastError", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    OutlinedButton({
-                        val text = "package=${ctx.packageName}\nsha1=$sha1\nwebClientId=$cid\nserver=$url\nlastError=$lastError"
-                        (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Scanner.ai sign-in details", text))
-                        say("Details copied")
-                    }) { Text("Copy details") }
-                }
-            }
-            Card(shape = RoundedCornerShape(20.dp)) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Privacy", style = MaterialTheme.typography.titleMedium)
-                    Text("When you use AI recognition, the page image you choose is sent over HTTPS to your Scanner.ai server, which forwards it to Google Gemini and returns the text. The server does not store your documents or the recognised text. Turn AI on or off in Settings.",
-                        style = MaterialTheme.typography.bodySmall)
+                    Text("When you use AI recognition, the chosen page image is sent over HTTPS to Scanner.ai server and forwarded to Google Gemini. Documents and recognised text are not stored by the app server.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Hide advanced troubleshooting" else "Advanced troubleshooting") }
+            if (advanced) {
+                Card(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Server settings", style = MaterialTheme.typography.titleMedium)
+                        OutlinedTextField(url, { url = it; prefs.backendUrl = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Server address") })
+                        OutlinedTextField(cid, { cid = it; prefs.googleClientId = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Google Web client ID") })
+                        Text("Gemini API key remains on the Cloudflare server.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Card(shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Sign-in help", style = MaterialTheme.typography.titleMedium)
+                        Text("Package name: " + ctx.packageName, style = MaterialTheme.typography.bodySmall)
+                        Text("This APK SHA-1: " + sha1, style = MaterialTheme.typography.bodySmall)
+                        Text("Web client ID: " + cid.take(12) + "…", style = MaterialTheme.typography.bodySmall)
+                        if (lastError.isNotEmpty()) Text("Last error: " + lastError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        OutlinedButton({
+                            val details = "package=" + ctx.packageName + "\nsha1=" + sha1 + "\nwebClientId=" + cid + "\nserver=" + url + "\nlastError=" + lastError
+                            (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Scanner.ai sign-in details", details))
+                            say("Details copied")
+                        }) { Text("Copy details") }
+                    }
                 }
             }
             if (prefs.signedIn) OutlinedButton({ confirmDelete = true }, Modifier.fillMaxWidth(), enabled = !working) {
