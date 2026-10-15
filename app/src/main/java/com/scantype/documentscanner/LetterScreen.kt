@@ -48,13 +48,16 @@ private fun Chips(vararg items: Pair<String, Boolean>, onPick: (Int) -> Unit) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
-                 onBack: () -> Unit, onAddCamera: () -> Unit, onCrop: (Int) -> Unit, onAccount: () -> Unit, onSaved: () -> Unit) {
+                 onBack: () -> Unit, onAddCamera: () -> Unit, onCrop: (Int) -> Unit, onAccount: () -> Unit, onSettings: () -> Unit, onSaved: () -> Unit) {
     val ctx = LocalContext.current
     var step by remember { mutableIntStateOf(0) }
+    var showFailureDetails by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf<String?>(null) }
+    var showAiHint by remember { mutableStateOf(false) }
     var opts by remember { mutableStateOf(LetterOpts()) }
     var name by remember { mutableStateOf("Letter_" + stamp()) }
     var open by remember { mutableIntStateOf(-1) }
+    var lastAutoKey by remember { mutableStateOf("") }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Downloads on this Android version.") } }
     fun say(m: String) { scope.launch { snack.showSnackbar(m) } }
 
@@ -66,18 +69,78 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
-    fun recognize() {
-        if (s.images.isEmpty()) return
+    fun runRecognition() {
+        if (s.images.isEmpty() || working != null) return
         scope.launch {
-            working = "Reading the letter and its layout…"
+            working = "Reading text and reconstructing the layout…"
             val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList()) }
             working = null
             res.onSuccess { r ->
                 s.blocks.clear(); s.blocks.addAll(r.blocks)
                 s.original = r.blocks; s.source = r.source; s.note = r.note; s.needLogin = r.needLogin
-                if (r.blocks.isEmpty()) say("No text was found. Please retake the photo in better light.") else step = 1
-            }.onFailure { say("We couldn't read this letter. Please try again with a clearer photo.") }
+                if (r.blocks.isEmpty()) {
+                    step = 0
+                    say(r.note.ifBlank { "No readable text was found. Retake the page straight-on in bright light." })
+                } else if (r.source != "AI") {
+                    // Same-layout output must come from the AI layout service; offline OCR is not an equivalent result.
+                    step = 0
+                    s.note = r.note.ifBlank { "AI layout recognition failed. Check your connection and try again." }
+                    say(s.note)
+                } else {
+                    working = "Creating typed PDF…"
+                    val saved = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val f = store.newFileExt("Typed_" + stamp(), "pdf")
+                            val report = LayoutPdf.render(r.blocks, LetterOpts(), f)
+                            if (!f.isFile || f.length() <= 100L || report.pages < 1) {
+                                f.delete()
+                                throw IllegalStateException("The PDF was empty.")
+                            }
+                            store.sidecar(f).writeText(r.blocks.joinToString("\n\n") { it.text })
+                            f
+                        }.getOrNull()
+                    }
+                    working = null
+                    if (saved != null) {
+                        val view = android.content.Intent(android.content.Intent.ACTION_VIEW)
+                            .setDataAndType(store.uri(saved), "application/pdf")
+                            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        val opened = runCatching { ctx.startActivity(view) }.isSuccess
+                        if (!opened) say("PDF saved in My Documents. No PDF viewer is installed.")
+                        onSaved()
+                    } else {
+                        step = 0
+                        s.note = "Could not create a valid PDF. Please try again with a clearer image."
+                        say(s.note)
+                    }
+                }
+            }.onFailure { e ->
+                s.note = e.message?.takeIf { it.isNotBlank() } ?: "AI recognition failed. Check your internet connection and try again."
+                step = 0
+                say(s.note)
+            }
         }
+    }
+
+    LaunchedEffect(s.images.map { it.toString() }, prefs.signedIn, prefs.aiReady) {
+        val key = s.images.joinToString("|") { it.toString() }
+        if (key.isNotBlank() && key != lastAutoKey && working == null) {
+            lastAutoKey = key
+            if (!prefs.signedIn) {
+                onAccount()
+            } else if (!prefs.aiReady) {
+                s.note = "AI recognition is turned off. Enable AI in Settings to create a Same-Layout Typed PDF."
+                say(s.note)
+            } else {
+                runRecognition()
+            }
+        }
+    }
+
+    fun recognize() {
+        if (s.images.isEmpty() || working != null) return
+        if (!prefs.signedIn) { onAccount(); return }
+        if (!prefs.aiReady) showAiHint = true else runRecognition()
     }
 
     fun render(f: File): LayoutReport = if (opts.clean) LayoutPdf.clean(s.blocks.toList(), opts, f) else LayoutPdf.render(s.blocks.toList(), opts, f)
@@ -89,19 +152,28 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
     val fail = "Could not create the PDF. Please try again."
 
     Scaffold(
-        topBar = { TopAppBar({ Text("Handwritten letter to PDF") }, navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
+        topBar = { TopAppBar({ Text("Same-Layout Typed PDF") }, navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } }) },
         snackbarHost = { SnackbarHost(snack) }
     ) { pad ->
         Column(Modifier.padding(pad)) {
-            TabRow(selectedTabIndex = step) {
-                Tab(step == 0, { step = 0 }, text = { Text("1 Photo") })
-                Tab(step == 1, { if (s.blocks.isNotEmpty()) step = 1 }, text = { Text("2 Edit") })
-                Tab(step == 2, { if (s.blocks.isNotEmpty()) step = 2 }, text = { Text("3 Preview") })
-            }
+            if (working != null) Text(working!!, Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.bodyMedium)
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Take a photo of the handwritten letter, or choose one from the gallery. Crop it to the page edges for the best layout.")
+                    Text("Handwriting photo चुनें या Camera से लें। इसके बाद AI अपने-आप typed PDF बनाएगा और खोल देगा। कोई layout setting नहीं चुननी पड़ेगी.")
+                    Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(if (prefs.aiReady) "AI layout recognition is enabled" else "AI layout recognition is off",
+                                style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(
+                                if (prefs.aiReady) "Photo चुनते ही text और layout पहचाना जाएगा, PDF बनेगा और खुलेगा."
+                                else "इस सुविधा के लिए Google Login और AI recognition चालू होना ज़रूरी है.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                        }
+                    }
+                    if (s.note.isNotEmpty()) Text(s.note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onAddCamera, Modifier.weight(1f)) { Text("Camera") }
                         OutlinedButton({ pickG.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, Modifier.weight(1f)) { Text("Gallery") }
@@ -114,9 +186,9 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             TextButton({ s.images.removeAt(i); if (i < s.origs.size) s.origs.removeAt(i) }) { Text("Remove") }
                         }
                     }
-                    Button({ recognize() }, Modifier.fillMaxWidth(), enabled = s.images.isNotEmpty() && working == null) { Text("Recognize Text & Layout") }
-                    Text(if (prefs.aiReady) "AI recognition is on (internet needed)." else "AI is off: on-device recognition will be used. It is weak on handwriting; turn AI on in Settings for better results.",
-                        style = MaterialTheme.typography.bodySmall)
+                    if (s.images.isNotEmpty() && working == null) {
+                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry PDF creation") }
+                    }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     item {
@@ -127,7 +199,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             Text("Check every block. Words marked [?] were unclear. Names, dates, numbers and amounts are never changed by the app.",
                                 style = MaterialTheme.typography.bodySmall)
                             Text("Output", style = MaterialTheme.typography.titleSmall)
-                            Chips("Same layout" to !opts.clean, "Clean professional letter" to opts.clean) { opts = opts.copy(clean = it == 1) }
+                            Chips("Same-Layout Typed PDF" to !opts.clean, "Clean professional letter" to opts.clean) { opts = opts.copy(clean = it == 1) }
                             Text("Font size", style = MaterialTheme.typography.titleSmall)
                             Chips(*listOf(11f, 12f, 13f, 14f, 16f).map { "${it.toInt()}" to (opts.baseFont == it) }.toTypedArray()) { opts = opts.copy(baseFont = listOf(11f, 12f, 13f, 14f, 16f)[it]) }
                             Text("Line spacing", style = MaterialTheme.typography.titleSmall)
@@ -204,7 +276,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                                 Text("Automatic adjustments (you can change them in step 2):", style = MaterialTheme.typography.titleSmall)
                                 notes.forEach { Text("• $it", fontSize = 12.sp) }
                             }
-                            item { Text("The PDF contains real, selectable text. Your original photo is kept separately on this phone.", style = MaterialTheme.typography.bodySmall) }
+                            item { Text(if (opts.clean) "The PDF contains selectable typed text in a clean letter format. Your original photo is kept separately on this phone." else "The PDF contains selectable text placed to resemble the photographed letter. OCR and layout can vary, so review every block before saving.", style = MaterialTheme.typography.bodySmall) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button({
@@ -250,6 +322,19 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                 }
             }
         }
+    }
+    if (showAiHint) {
+        AlertDialog(
+            onDismissRequest = { showAiHint = false },
+            title = { Text("Enable AI for better layout matching?") },
+            text = { Text("AI is currently off. Turn on AI in Settings before using Same-Layout Typed PDF. No offline PDF will be created because it may not preserve the handwriting or layout.") },
+            confirmButton = {
+                TextButton(onClick = { showAiHint = false; onSettings() }) { Text("Open Settings") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAiHint = false }) { Text("Cancel") }
+            }
+        )
     }
 }
 
