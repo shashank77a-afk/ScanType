@@ -69,7 +69,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         }
     }
 
-    fun runRecognition(allowAiFallback: Boolean = false) {
+    fun runRecognition() {
         if (s.images.isEmpty() || working != null) return
         scope.launch {
             working = "Reading text on this device…"
@@ -122,13 +122,13 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         val key = s.images.joinToString("|") { it.toString() }
         if (key.isNotBlank() && key != lastAutoKey && working == null) {
             lastAutoKey = key
-            runRecognition()
+            if (!prefs.signedIn) onAccount() else runRecognition()
         }
     }
 
     fun recognize() {
         if (s.images.isEmpty() || working != null) return
-        runRecognition(false)
+        runRecognition()
     }
 
     fun render(f: File): LayoutReport = if (opts.clean) LayoutPdf.clean(s.blocks.toList(), opts, f) else LayoutPdf.render(s.blocks.toList(), opts, f)
@@ -174,7 +174,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                         }
                     }
                     if (s.images.isNotEmpty() && working == null) {
-                        OutlinedButton({ lastAutoKey = ""; runRecognition(false) }, Modifier.fillMaxWidth()) { Text("Retry offline PDF creation") }
+                        OutlinedButton({ lastAutoKey = ""; runRecognition() }, Modifier.fillMaxWidth()) { Text("Retry AI PDF creation") }
                         
                     }
                 }
