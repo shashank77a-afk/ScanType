@@ -236,9 +236,8 @@ object LetterAnalyzer {
         }
     }
 
-    private fun isWeakLocalResult(blocks: List<LBlock>, uri: Uri): Boolean {
-        val chars = blocks.sumOf { it.text.count(Char::isLetterOrDigit) }
-        // Use conservative signals only. Weak local text prompts optional AI; it doesn't silently upload.
+    private fun isWeakLocalResult(blocks: List<LBlock>): Boolean {
+        val chars = blocks.sumOf { block -> block.text.count { it.isLetterOrDigit() } }
         return blocks.isEmpty() || chars < 24
     }
 
@@ -248,7 +247,7 @@ object LetterAnalyzer {
         var note = ""
         for ((i, uri) in uris.withIndex()) {
             val local = runCatching { offline(ctx, uri, i, all.size) }.getOrDefault(emptyList())
-            val weak = isWeakLocalResult(local, uri)
+            val weak = isWeakLocalResult(local)
             val chosen = if (weak && allowAiFallback && prefs.aiReady && prefs.signedIn) {
                 runCatching { aiFallback(ctx, prefs, uri, i, all.size) }.getOrElse { e ->
                     note = "Local OCR was used because AI fallback failed: ${aiMessage(e)}"
