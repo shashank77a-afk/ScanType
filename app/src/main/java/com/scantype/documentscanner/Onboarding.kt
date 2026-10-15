@@ -28,7 +28,7 @@ fun Onboarding(onDone: () -> Unit) {
     var i by remember { mutableIntStateOf(0) }
     val (icon, title, text) = pages[i]
     Column(Modifier.fillMaxSize().padding(28.dp), Arrangement.Center, Alignment.CenterHorizontally) {
-        Image(painterResource(R.drawable.scantype_logo), "ScanType", Modifier.size(72.dp).clip(RoundedCornerShape(18.dp)))
+        Image(painterResource(R.drawable.scanner_ai_icon), "Scanner.ai", Modifier.size(84.dp).clip(RoundedCornerShape(22.dp)))
         Spacer(Modifier.height(24.dp))
         Icon(icon, null, Modifier.size(56.dp), tint = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(12.dp))
