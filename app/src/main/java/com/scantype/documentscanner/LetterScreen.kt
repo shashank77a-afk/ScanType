@@ -73,7 +73,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         if (s.images.isEmpty() || working != null) return
         scope.launch {
             working = "Reading text on this device…"
-            val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList(), allowAiFallback) }
+            val res = runCatching { LetterAnalyzer.analyze(ctx, prefs, s.images.toList()) }
             working = null
             res.onSuccess { r ->
                 s.blocks.clear(); s.blocks.addAll(r.blocks)
@@ -122,7 +122,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
         val key = s.images.joinToString("|") { it.toString() }
         if (key.isNotBlank() && key != lastAutoKey && working == null) {
             lastAutoKey = key
-            runRecognition(false)
+            runRecognition()
         }
     }
 
@@ -148,13 +148,13 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
             if (working != null) LinearProgressIndicator(Modifier.fillMaxWidth())
             when (step) {
                 0 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Photo चुनें या Camera से लें। टेक्स्ट पहचानना, layout बनाना और PDF तैयार करना फोन पर होगा। कठिन handwriting के लिए चाहें तो AI fallback चुन सकते हैं.")
+                    Text("Photo चुनें या Camera से लें। AI handwriting और layout पहचानेगा और typed PDF बनाएगा।")
                     Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Local OCR and PDF engine are enabled",
+                            Text("AI Same-Layout Typed PDF",
                                 style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             Text(
-                                "Photo चुनते ही local OCR चलेगा। जरूरत होने पर अलग बटन से वैकल्पिक AI fallback चला सकते हैं.",
+                                "यह सुविधा केवल AI से चलती है। फोटो AI service को भेजी जाएगी; PDF अपने-आप बनेगी.",
                                 style = MaterialTheme.typography.bodySmall
                             )
 
@@ -175,7 +175,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                     }
                     if (s.images.isNotEmpty() && working == null) {
                         OutlinedButton({ lastAutoKey = ""; runRecognition(false) }, Modifier.fillMaxWidth()) { Text("Retry offline PDF creation") }
-                        OutlinedButton({ if (!prefs.signedIn) onAccount() else if (!prefs.aiReady) onSettings() else runRecognition(true) }, Modifier.fillMaxWidth()) { Text("Try AI fallback for difficult handwriting (optional)") }
+                        
                     }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
