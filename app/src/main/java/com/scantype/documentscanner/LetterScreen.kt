@@ -154,8 +154,7 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                             Text("Local OCR and PDF engine are enabled",
                                 style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                             Text(
-                                if (prefs.aiReady) "Photo चुनते ही text और layout पहचाना जाएगा, PDF बनेगा और खुलेगा."
-                                else "इस सुविधा के लिए Google Login और AI recognition चालू होना ज़रूरी है.",
+                                "Photo चुनते ही local OCR चलेगा। जरूरत होने पर अलग बटन से वैकल्पिक AI fallback चला सकते हैं.",
                                 style = MaterialTheme.typography.bodySmall
                             )
 
@@ -175,7 +174,8 @@ fun LetterScreen(s: LetterState, store: DocStore, prefs: Prefs, snack: SnackbarH
                         }
                     }
                     if (s.images.isNotEmpty() && working == null) {
-                        OutlinedButton({ lastAutoKey = ""; runRecognition(false) }, Modifier.fillMaxWidth()) { Text("Retry offline PDF creation") }\n                        OutlinedButton({ if (!prefs.signedIn) onAccount() else if (!prefs.aiReady) onSettings() else runRecognition(true) }, Modifier.fillMaxWidth()) { Text("Try AI fallback for difficult handwriting (optional)") }
+                        OutlinedButton({ lastAutoKey = ""; runRecognition(false) }, Modifier.fillMaxWidth()) { Text("Retry offline PDF creation") }
+                        OutlinedButton({ if (!prefs.signedIn) onAccount() else if (!prefs.aiReady) onSettings() else runRecognition(true) }, Modifier.fillMaxWidth()) { Text("Try AI fallback for difficult handwriting (optional)") }
                     }
                 }
                 1 -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
