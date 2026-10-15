@@ -1,1 +1,3 @@
-<resources><string name="app_name">ScanType</string></resources>
+<resources>
+    <string name="app_name">Scanner.ai</string>
+</resources>
