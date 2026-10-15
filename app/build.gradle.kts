@@ -19,8 +19,8 @@ android {
         applicationId = "com.scantype.documentscanner"
         minSdk = 24
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4.0"
+        versionCode = 6
+        versionName = "1.5.0"
 
         // Default server and OAuth Web Client ID used by Gemini.kt.
         buildConfigField("String", "BACKEND_URL", "\"https://scantype-api.scantype.workers.dev\"")

@@ -5,9 +5,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
-    <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
+    <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="false" android:theme="@style/Theme.ScanType">
-        <!-- Google test App ID. Replace with ScanType production App ID only after testing. -->
+        <!-- Google test App ID. Configure the production AdMob App ID before Play Store release. -->
         <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3940256099942544~3347511713" />
         <activity android:name=".MainActivity" android:exported="true">
