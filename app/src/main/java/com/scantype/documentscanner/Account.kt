@@ -113,8 +113,7 @@ fun AccountScreen(prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                         Text("Scanning, crop, PDF and Word work without an account. Sign in only to use AI handwriting recognition.",
                             style = MaterialTheme.typography.bodySmall)
                         Button({
-                            if (prefs.backendUrl.isBlank()) say("Enter the server address below first.")
-                            else withGoogle { token -> Backend.signIn(prefs, token); say("Signed in") }
+                            withGoogle { token -> Backend.signIn(prefs, token); say("Signed in") }
                         }, enabled = !working) { Text("Sign in with Google") }
                     }
                     if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
