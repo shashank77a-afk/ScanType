@@ -53,12 +53,12 @@ class LetterResult(val blocks: List<LBlock>, val source: String, val note: Strin
 class LayoutReport(val notes: List<String>, val pages: Int)
 
 private const val LAYOUT_PROMPT =
-    "You are a document-layout extraction engine. Inspect the provided photo of a handwritten or printed Hindi, English, or mixed-language official letter. Return one complete JSON object only.\n" +
-    "Schema: {\"language\":\"hi|en|mixed\",\"pageAspect\":0.707,\"blocks\":[{\"text\":\"exact visible text\",\"role\":\"recipient|reference|date|subject|salutation|body|enclosure_heading|enclosure_item|closing|signature|other\",\"align\":\"left|center|right|justify\",\"box\":[x0,y0,x1,y1],\"bold\":false}]}\n" +
-    "Coordinates are integers from 0 to 1000 relative to the full page, origin at top-left; box is [left,top,right,bottom]. pageAspect is page width divided by page height.\n" +
-    "Make one block per paragraph or logical group. Preserve headings, recipient, reference, date, subject, salutation, body paragraphs, enclosure list, closing, signature and designation. Keep reading order top-to-bottom. Transcribe faithfully; do not translate, correct spelling, summarize, or invent text. For unreadable words, use [?].\n" +
-    "Every block must have non-empty text. Use sensible positive boxes that do not exceed 1000. Do not include markdown fences, comments, or extra fields outside the JSON object. Keep the response concise enough to fit in one complete response.";
-
+    "Analyze this photo of a letter (Hindi or English, handwritten or printed) and return its text together with its page layout as JSON:\n" +
+    "{\"language\":\"hi|en|mixed\",\"pageAspect\":<page width divided by page height>,\"blocks\":[{\"text\":\"...\",\"role\":\"recipient|reference|date|subject|salutation|body|enclosure_heading|enclosure_item|closing|signature|other\",\"align\":\"left|center|right|justify\",\"box\":[x0,y0,x1,y1],\"bold\":false}]}\n" +
+    "box is the area of the block on the PAGE, from 0 to 1000, origin at the top-left corner of the page, x to the right, y downward.\n" +
+    "Rules: one block per paragraph or logical group (recipient and address together, one block per enclosure item, closing words, name and designation under the signature). Keep reading order top to bottom. " +
+    "Transcribe exactly as written: do not correct, translate or add any word, name, date, number or amount. Join lines that are only wrapped inside one paragraph; keep a line break only where the writer started a new line on purpose. " +
+    "If a word is unclear, write your best reading followed by [?]. Never invent text. Output only the JSON."
 
 object LetterAnalyzer {
     private fun alignOf(s: String) = when (s) { "center" -> DocAlign.CENTER; "right" -> DocAlign.RIGHT; "justify" -> DocAlign.JUSTIFY; else -> DocAlign.LEFT }
@@ -218,51 +218,34 @@ object LetterAnalyzer {
         }
     }
 
-    /**
-     * Hybrid path: local OCR and local rule-based layout run first. Gemini is only an
-     * optional rescue path when local OCR returns no usable text or a very small result.
-     * PDF rendering never calls AI.
-     */
-    private suspend fun aiFallback(ctx: Context, prefs: Prefs, uri: Uri, page: Int, startId: Int): List<LBlock> {
+    private suspend fun ai(ctx: Context, prefs: Prefs, uri: Uri, page: Int, startId: Int): List<LBlock> {
         val jpeg = jpegBytes(ctx, uri)
-        val text = if (prefs.aiViaBackend) {
-            Backend.ocr(prefs, jpeg, prefs.lang)
-        } else {
-            geminiDirect(prefs, "Transcribe the readable Hindi and English text from this document exactly. Preserve paragraph breaks. Do not summarize or invent words.", jpeg, false)
-        }
-        return text.lines().map { it.trim() }.filter { it.isNotEmpty() }.mapIndexed { index, line ->
-            val y0 = (0.06f + index * 0.045f).coerceAtMost(0.94f)
-            LBlock(startId + index, page, line, roleOf(line), DocAlign.LEFT, 0.10f, y0, 0.90f, (y0 + 0.035f).coerceAtMost(0.99f))
-        }
+        val layout = if (prefs.aiViaBackend) Backend.letterLayout(prefs, jpeg, prefs.lang)
+        else JSONObject(geminiDirect(prefs, LAYOUT_PROMPT + langNote(prefs.lang), jpeg, true))
+        return parse(layout, page, startId)
     }
 
-    private fun isWeakLocalResult(blocks: List<LBlock>): Boolean {
-        val chars = blocks.sumOf { block -> block.text.count { it.isLetterOrDigit() } }
-        return blocks.isEmpty() || chars < 24
-    }
-
-    suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>, allowAiFallback: Boolean = false): LetterResult {
+    suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
+        var useAi = prefs.aiReady
+        var source = if (useAi) "AI" else "On-device"
+        if (!prefs.signedIn) throw AiException("login_required", "Please sign in with Google to use Same-Layout Typed PDF.")
+        if (!prefs.aiReady) throw AiException("ai_disabled", "Enable AI recognition in Settings before creating a Same-Layout Typed PDF.")
         val all = ArrayList<LBlock>()
-        var source = "On-device OCR"
-        var note = ""
-        for ((i, uri) in uris.withIndex()) {
-            val local = runCatching { offline(ctx, uri, i, all.size) }.getOrDefault(emptyList())
-            val weak = isWeakLocalResult(local)
-            val chosen = if (weak && allowAiFallback && prefs.aiReady && prefs.signedIn) {
-                runCatching { aiFallback(ctx, prefs, uri, i, all.size) }.getOrElse { e ->
-                    note = "Local OCR was used because AI fallback failed: ${aiMessage(e)}"
-                    local
-                }.also { if (it.isNotEmpty()) source = "AI fallback" }
-            } else {
-                if (weak) note = "Local OCR may have missed handwritten words. Review the text, or choose AI fallback if you want."
-                local
+        for ((i, u) in uris.withIndex()) {
+            val blocks = try {
+                ai(ctx, prefs, u, i, all.size)
+            } catch (e: Exception) {
+                // This feature promises AI layout reconstruction; do not substitute on-device OCR.
+                throw AiException(
+                    (e as? AiException)?.code ?: "letter_layout_failed",
+                    aiMessage(e).ifBlank { "AI could not reconstruct the page layout. Please retry." },
+                    (e as? AiException)?.resetsAt ?: 0L
+                )
             }
-            if (chosen.isEmpty()) {
-                throw AiException("ocr_no_text", "No text was detected locally. Improve the crop/lighting and retry, or enable optional AI fallback.")
-            }
-            all.addAll(chosen)
+            if (blocks.isEmpty()) throw AiException("letter_layout_empty", "AI returned no readable text for this page. Retake it straight-on in bright light.")
+            all.addAll(blocks)
         }
-        return LetterResult(all, source, note, false)
+        return LetterResult(all, "AI", "", false)
     }
 }
 
