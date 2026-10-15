@@ -157,30 +157,24 @@ object LetterAnalyzer {
     suspend fun analyze(ctx: Context, prefs: Prefs, uris: List<Uri>): LetterResult {
         var useAi = prefs.aiReady
         var source = if (useAi) "AI" else "On-device"
-        var note = ""; var login = false
+        if (!prefs.signedIn) throw AiException("login_required", "Please sign in with Google to use Same-Layout Typed PDF.")
+        if (!prefs.aiReady) throw AiException("ai_disabled", "Enable AI recognition in Settings before creating a Same-Layout Typed PDF.")
         val all = ArrayList<LBlock>()
         for ((i, u) in uris.withIndex()) {
-            var got: List<LBlock>? = null
-            if (useAi) {
-                try { got = ai(ctx, prefs, u, i, all.size) }
-                catch (e: Exception) {
-                    useAi = false; source = "On-device"
-                    login = needsLogin(e)
-                    note = aiMessage(e) + " On-device recognition was used instead, so text and layout accuracy are limited."
-                }
+            val blocks = try {
+                ai(ctx, prefs, u, i, all.size)
+            } catch (e: Exception) {
+                // This feature promises AI layout reconstruction; do not substitute on-device OCR.
+                throw AiException(
+                    (e as? AiException)?.code ?: "letter_layout_failed",
+                    aiMessage(e).ifBlank { "AI could not reconstruct the page layout. Please retry." },
+                    (e as? AiException)?.resetsAt ?: 0L
+                )
             }
-            val list = if (got.isNullOrEmpty()) offline(ctx, u, i, all.size) else got
-            if (list.isEmpty() && note.isEmpty()) {
-                note = if (useAi) {
-                    "AI did not return readable text. Retake the page straight-on in bright light, then retry."
-                } else {
-                    "On-device OCR found no readable text. Sign in and enable AI in Settings for handwritten layout recognition."
-                }
-            }
-            all.addAll(list)
+            if (blocks.isEmpty()) throw AiException("letter_layout_empty", "AI returned no readable text for this page. Retake it straight-on in bright light.")
+            all.addAll(blocks)
         }
-        if (!prefs.aiReady && note.isEmpty()) note = "AI is off, so on-device OCR was used. It supports Latin and Devanagari text, but handwritten text may need manual correction."
-        return LetterResult(all, source, note, login)
+        return LetterResult(all, "AI", "", false)
     }
 }
 
