@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ScannerAI" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#0A7F4F</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F3FAF6</item>
+        <item name="android:navigationBarColor">#F3FAF6</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowSplashScreenBackground">#F3FAF6</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/scanner_ai_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FFFFFFFF</item>
+    </style>
+</resources>
