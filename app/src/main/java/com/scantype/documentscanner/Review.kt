@@ -478,44 +478,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Same filter for all pages", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Switch(applyAll, { applyAll = it })
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { compareOriginal = !compareOriginal }) {
-                    Text(if (compareOriginal) "Show Filter" else "Compare", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = { r.undo(cur); compareOriginal = false }, enabled = r.canUndo(cur)) {
-                    Text("Undo", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = { r.redo(cur); compareOriginal = false }, enabled = r.canRedo(cur)) {
-                    Text("Redo", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = {
-                    r.pushUndo(cur)
-                    r.filters[cur] = PageFilter.ORIGINAL
-                    r.rots[cur] = 0
-                    compareOriginal = false
-                }) { Text("Reset", color = MaterialTheme.colorScheme.primary) }
-            }
-            LazyRow(Modifier.padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(PageFilter.values().toList()) { f ->
-                    val sel = f == flt
-                    Column(Modifier.clickable {
-                        if (applyAll) {
-                            for (i in r.filters.indices) if (r.filters[i] != f) { r.pushUndo(i); r.filters[i] = f }
-                        } else if (r.filters[cur] != f) { r.pushUndo(cur); r.filters[cur] = f }
-                    }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(64.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
-                            .then(if (sel) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)) {
-                            thumbs[f]?.let { Image(it.asImageBitmap(), f.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                        }
-                        Text(f.label, color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
-                    }
-                }
-            }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
