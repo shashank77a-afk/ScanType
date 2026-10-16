@@ -67,6 +67,8 @@ fun App(prefs: Prefs) {
     var idCropRot by remember { mutableIntStateOf(0) }
     var toolStart by remember { mutableStateOf<Tool?>(null) }
     var viewerFile by remember { mutableStateOf<File?>(null) }
+    var editSourcePdf by remember { mutableStateOf<File?>(null) }
+    var editPageUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var studio by remember { mutableStateOf<StudioInit?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
@@ -93,6 +95,34 @@ fun App(prefs: Prefs) {
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Gallery on this Android version.") } }
     fun toast(m: String) { scope.launch { snack.showSnackbar(m) } }
     fun refresh() { docs = store.list(); sel.retainAll { it.exists() } }
+
+    fun clearSavedPdfEditSession() {
+        val files = editPageUris.mapNotNull { uri -> uri.path?.let(::File) }
+        val directories = files.mapNotNull { it.parentFile }.distinct()
+        files.forEach { runCatching { it.delete() } }
+        directories.forEach { runCatching { it.delete() } }
+        editPageUris = emptyList()
+        editSourcePdf = null
+    }
+
+    fun startEditingSavedPdf(file: File) {
+        scope.launch {
+            busy = "Preparing PDF for editing…"
+            val pages = withContext(Dispatchers.IO) {
+                runCatching { store.renderPdfPagesForEditing(file) }
+            }
+            busy = null
+            pages.onSuccess { uris ->
+                editSourcePdf = file
+                editPageUris = uris
+                viewerFile = null
+                review = ReviewState(uris, PageFilter.ORIGINAL)
+                toast("Edit pages, filters or markup, then save as a new PDF. Original file will be kept.")
+            }.onFailure {
+                toast("Could not prepare this PDF for editing. Please try again.")
+            }
+        }
+    }
 
     fun runOcr(uris: List<Uri>, handwriting: Boolean, forceOffline: Boolean = false) {
         val useAi = prefs.aiReady && !forceOffline
@@ -244,7 +274,7 @@ fun App(prefs: Prefs) {
         PdfViewerScreen(
             file = vf,
             onBack = { viewerFile = null },
-            onEditPages = { viewerFile = null; toolStart = Tool.DELETE },
+            onEditPages = { startEditingSavedPdf(vf) },
             onOpenExternal = {
                 val uri = store.uri(vf)
                 val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
@@ -365,8 +395,20 @@ fun App(prefs: Prefs) {
     if (rv != null) {
         BackHandler { review = null }
         ScanReviewScreen(rv, store, prefs, snack, scope,
-            onBack = { review = null },
-            onSaved = { review = null; refresh(); tab = 0; toast("Saved to Documents") },
+            onBack = {
+                review = null
+                if (editSourcePdf != null) clearSavedPdfEditSession()
+            },
+            onSaved = {
+                review = null
+                if (editSourcePdf != null) {
+                    clearSavedPdfEditSession()
+                    refresh(); tab = 0
+                    toast("Edited PDF saved as a new file. Original kept.")
+                } else {
+                    refresh(); tab = 0; toast("Saved to Documents")
+                }
+            },
             onExtract = { runOcr(rv.pages.toList(), false) },
             onAddCamera = { retakeIdx = null; camMode = CamMode.DOCS },
             onRetake = { i -> retakeIdx = i; camMode = CamMode.DOCS },
