@@ -4,6 +4,10 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.RenderEffect
+import android.os.Build
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -56,6 +60,41 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.max
 
+private fun livePreviewMatrix(filter: PageFilter): ColorMatrix {
+    val sat = when (filter) {
+        PageFilter.BW -> 0f
+        PageFilter.OMNIFIX -> 0.92f
+        else -> 1f
+    }
+    val (contrast, brightness) = when (filter) {
+        PageFilter.ORIGINAL -> 1f to 0f
+        PageFilter.ENHANCE -> 1.22f to 8f
+        PageFilter.LIGHTEN -> 1.05f to 22f
+        PageFilter.NO_SHADOW -> 1.12f to 18f
+        PageFilter.OMNIFIX -> 1.14f to 7f
+        PageFilter.BW -> 1.32f to 4f
+    }
+    val matrix = ColorMatrix().apply { setSaturation(sat) }
+    val shift = (0.5f - 0.5f * contrast) * 255f + brightness
+    matrix.postConcat(ColorMatrix(floatArrayOf(
+        contrast, 0f, 0f, 0f, shift,
+        0f, contrast, 0f, 0f, shift,
+        0f, 0f, contrast, 0f, shift,
+        0f, 0f, 0f, 1f, 0f
+    )))
+    return matrix
+}
+
+/** Live effect is a light preview approximation. The selected full-resolution filter is applied after capture too. */
+private fun applyLivePreview(view: PreviewView, filter: PageFilter, enabled: Boolean) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        view.setRenderEffect(
+            if (enabled) RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(livePreviewMatrix(filter)))
+            else null
+        )
+    }
+}
+
 enum class CamMode(val label: String) {
     DOCS("Docs"), ID("ID Card"), BOOK("Book"), QR("QR Code"), TEXT("To Text"), HAND("Handwriting")
 }
@@ -71,7 +110,7 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 /** ScanType's own camera. Asks for the CAMERA permission itself and explains what to do if it is denied. */
 @Composable
 fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, prefs: Prefs,
-                 hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit) {
+                 hint: String?, onDone: (List<Uri>, CamMode, PageFilter) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     fun has() = ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -79,7 +118,7 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
     var denied by remember { mutableStateOf(false) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> granted = ok; if (!ok) denied = true }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
-        if (us.isNotEmpty()) onDone(us, mode)
+        if (us.isNotEmpty()) onDone(us, mode, PageFilter.ENHANCE)
     }
     DisposableEffect(owner) {
         val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) granted = has() }
@@ -108,6 +147,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val owner = ctx as ComponentActivity
     val shots = remember { mutableStateListOf<Uri>() }
     var flash by remember { mutableStateOf(false) }
+    var liveFilter by remember { mutableStateOf(PageFilter.ENHANCE) }
     var busy by remember { mutableStateOf(false) }
     var autoOn by remember { mutableStateOf(prefs.autoCapture) }
     var quad by remember { mutableStateOf<FloatArray?>(null) }
@@ -119,6 +159,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val analysis = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
     val modeNow by rememberUpdatedState(mode)
     val autoNow by rememberUpdatedState(autoOn)
+    val filterNow by rememberUpdatedState(liveFilter)
     val busyNow by rememberUpdatedState(busy)
     val stable = remember { IntArray(1) }
     val cooldown = remember { LongArray(1) }
@@ -128,7 +169,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
     LaunchedEffect(mode) { shots.clear(); quad = null; qr = null }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
-        if (us.isNotEmpty()) onDone(us, mode)
+        if (us.isNotEmpty()) onDone(us, mode, liveFilter)
     }
 
     fun shoot() {
@@ -141,9 +182,9 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     busy = false
                     val u = Uri.fromFile(f)
-                    if (mode == CamMode.ID || mode == CamMode.BOOK) onDone(listOf(u), mode)
+                    if (mode == CamMode.ID || mode == CamMode.BOOK) onDone(listOf(u), mode, filterNow)
                     else if (batch && (mode == CamMode.DOCS)) shots.add(u)
-                    else onDone(listOf(u), mode)
+                    else onDone(listOf(u), mode, filterNow)
                 }
                 override fun onError(e: ImageCaptureException) {
                     busy = false
@@ -213,6 +254,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(modifier = Modifier.fillMaxSize(), factory = { c ->
             PreviewView(c).apply {
+                implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                 scaleType = PreviewView.ScaleType.FIT_CENTER
                 val fut = ProcessCameraProvider.getInstance(c)
                 fut.addListener({
@@ -225,7 +267,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     }
                 }, ContextCompat.getMainExecutor(c))
             }
-        })
+        }, update = { view -> applyLivePreview(view, liveFilter, mode == CamMode.DOCS || mode == CamMode.ID || mode == CamMode.BOOK) })
         val q = quad
         if (q != null) Canvas(Modifier.fillMaxSize()) {
             val bw = size.width; val bh = size.height
@@ -253,6 +295,18 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
             else if (mode == CamMode.DOCS) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("Single", !batch) { onBatch(false) }
                 Pill("Batch", batch) { onBatch(true) }
+            }
+            if (mode == CamMode.DOCS || mode == CamMode.ID || mode == CamMode.BOOK) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    PageFilter.values().forEach { f ->
+                        Pill(f.label, liveFilter == f) { liveFilter = f }
+                    }
+                }
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                    Text("Live filter preview needs Android 12+; selected filter will still apply after capture.",
+                        color = Color.White.copy(alpha = 0.72f), fontSize = 11.sp)
+                }
             }
             Row(Modifier.horizontalScroll(rememberScrollState())) {
                 CamMode.values().forEach { m ->
