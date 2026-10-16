@@ -27,7 +27,8 @@ class DocStore(private val ctx: Context) {
 
     private fun newFile(prefix: String): File {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return File(dir, "${prefix}_$ts.pdf")
+        // Two exports can finish within the same second; never overwrite an earlier document.
+        return unique("${prefix}_$ts")
     }
     private fun clean(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     private fun unique(base: String): File {
