@@ -72,8 +72,8 @@ class ReviewState(initial: List<Uri>) {
 @Composable
 private fun BarButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(Modifier.clickable { onClick() }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, label, tint = Color.White)
-        Text(label, color = Color.White, fontSize = 11.sp)
+        Icon(icon, label, tint = MaterialTheme.colorScheme.onBackground)
+        Text(label, color = MaterialTheme.colorScheme.onBackground, fontSize = 11.sp)
     }
 }
 
@@ -83,8 +83,8 @@ private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onCl
     val bmp by produceState<Bitmap?>(null, uri, rot) {
         value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
     }
-    Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF164532))
-        .then(if (selected) Modifier.border(3.dp, Cyan, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
+    Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
+        .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
         bmp?.let { Image(it.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         Text(label, color = Color.White, fontSize = 10.sp, modifier = Modifier.align(Alignment.BottomStart).background(Color(0x99000000)).padding(horizontal = 4.dp))
     }
@@ -193,21 +193,21 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
 
-    Scaffold(containerColor = Navy, snackbarHost = { SnackbarHost(snack) }) { pad ->
+    Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back", tint = Color.White) }
+                IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.onBackground) }
                 BasicTextField(r.title, { r.title = it }, Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
                     .background(Color(0x22FFFFFF)).padding(horizontal = 12.dp, vertical = 10.dp),
-                    textStyle = TextStyle(color = Color.White, fontSize = 17.sp), singleLine = true, cursorBrush = SolidColor(Cyan))
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 17.sp), singleLine = true, cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
                 Spacer(Modifier.width(8.dp))
-                Button({ fDialog = true }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Navy)) {
+                Button({ fDialog = true }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) {
                     Text(if (saving) "Working…" else "Finish")
                 }
             }
             warn?.let { w ->
                 Row(Modifier.fillMaxWidth().background(Color(0x33FFC107)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(w, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text(w, color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
                     TextButton({ onRetake(cur) }) { Text("Retake", color = Cyan) }
                 }
             }
@@ -220,17 +220,17 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = Cyan) }
+                TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = MaterialTheme.colorScheme.primary) }
                 Spacer(Modifier.weight(1f))
-                Text("Page ${cur + 1} of ${r.pages.size}", color = Color.White)
+                Text("Page ${cur + 1} of ${r.pages.size}", color = MaterialTheme.colorScheme.onBackground)
                 Spacer(Modifier.weight(1f))
-                TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = Cyan) }
+                TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = MaterialTheme.colorScheme.primary) }
             }
             LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Same filter for all pages", color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                Text("Same filter for all pages", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Switch(applyAll, { applyAll = it })
             }
             LazyRow(Modifier.padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 12.dp),
@@ -241,10 +241,10 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         if (applyAll) { for (i in r.filters.indices) r.filters[i] = f } else r.filters[cur] = f
                     }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.size(64.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
-                            .then(if (sel) Modifier.border(3.dp, Cyan, RoundedCornerShape(10.dp)) else Modifier)) {
+                            .then(if (sel) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)) {
                             thumbs[f]?.let { Image(it.asImageBitmap(), f.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                         }
-                        Text(f.label, color = if (sel) Cyan else Color.White, fontSize = 11.sp)
+                        Text(f.label, color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
                     }
                 }
             }
