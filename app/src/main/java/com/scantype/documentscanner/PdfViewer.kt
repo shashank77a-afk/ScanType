@@ -98,7 +98,7 @@ fun PdfViewerScreen(
                     IconButton(onShare) { Icon(Icons.Filled.Share, "Share PDF") }
                     IconButton(onPrint) { Icon(Icons.Filled.Print, "Print PDF") }
                     IconButton(onSave) { Icon(Icons.Filled.SaveAlt, "Save to Downloads") }
-                    IconButton(onEditPages) { Icon(Icons.Filled.Edit, "Page tools") }
+                    IconButton(onEditPages) { Icon(Icons.Filled.Edit, "Edit PDF") }
                 }
             )
         }
