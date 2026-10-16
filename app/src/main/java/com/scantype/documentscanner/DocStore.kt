@@ -120,7 +120,7 @@ class DocStore(private val ctx: Context) {
     }
 
     /** Builds a PDF from bitmaps supplied one at a time (each is recycled after use). */
-    fun bitmapsToPdf(n: Int, name: String, get: (Int) -> Bitmap) {
+    fun bitmapsToPdf(n: Int, name: String, get: (Int) -> Bitmap): File {
         val doc = PdfDocument()
         try {
             for (i in 0 until n) {
@@ -131,7 +131,9 @@ class DocStore(private val ctx: Context) {
                 p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
                 doc.finishPage(p); bmp.recycle()
             }
-            unique(name).outputStream().use { doc.writeTo(it) }
+            val out = unique(name)
+            out.outputStream().use { doc.writeTo(it) }
+            return out
         } finally { doc.close() }
     }
 
