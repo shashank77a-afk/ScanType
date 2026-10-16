@@ -294,6 +294,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var applyAll by remember { mutableStateOf(true) }
     var compareOriginal by remember { mutableStateOf(false) }
     var editorTab by remember { mutableStateOf("Images") }
+    var showFilterPanel by remember { mutableStateOf(false) }
+    var filterPanelOriginals by remember { mutableStateOf<Map<Int, PageFilter>>(emptyMap()) }
     var showTextDialog by remember { mutableStateOf(false) }
     var showWatermarkDialog by remember { mutableStateOf(false) }
     var showSignatureDialog by remember { mutableStateOf(false) }
