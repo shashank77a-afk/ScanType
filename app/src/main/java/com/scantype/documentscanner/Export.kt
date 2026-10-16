@@ -94,7 +94,7 @@ object Export {
             val v = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, "$display.$ext")
                 put(MediaStore.Images.Media.MIME_TYPE, mime)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ScanType")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ScannerAi")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val cr = ctx.contentResolver
@@ -102,7 +102,7 @@ object Export {
             cr.openOutputStream(uri)!!.use { bmp.compress(fmt, 95, it) }
             cr.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
         } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ScanType").apply { mkdirs() }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ScannerAi").apply { mkdirs() }
             var f = File(dir, "$display.$ext"); var n = 1
             while (f.exists()) f = File(dir, "${display}_${n++}.$ext")
             f.outputStream().use { bmp.compress(fmt, 95, it) }
@@ -133,7 +133,7 @@ object Export {
             val v = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, name)
                 put(MediaStore.Downloads.MIME_TYPE, mime)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ScanType")
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ScannerAi")
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val cr = ctx.contentResolver
@@ -141,7 +141,7 @@ object Export {
             cr.openOutputStream(uri)!!.use { o -> FileInputStream(f).use { it.copyTo(o) } }
             cr.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
         } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "ScanType").apply { mkdirs() }
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "ScannerAi").apply { mkdirs() }
             val d = File(dir, name)
             FileInputStream(f).use { i -> d.outputStream().use { i.copyTo(it) } }
             MediaScannerConnection.scanFile(ctx, arrayOf(d.path), arrayOf(mime), null)
