@@ -88,12 +88,15 @@ fun PdfViewerScreen(
     var newName by remember(file.path) { mutableStateOf(file.nameWithoutExtension) }
     var moreMenu by remember { mutableStateOf(false) }
     var tagsDialog by remember { mutableStateOf(false) }
-    var tags by remember(file.path) { mutableStateOf("") }
+    var tags by remember(file.path, file.lastModified()) { mutableStateOf("") }
     val count by produceState(0, file.path, file.lastModified()) {
         value = withContext(Dispatchers.IO) {
             runCatching { PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { it.pageCount } }
                 .getOrDefault(0)
         }
+    }
+    LaunchedEffect(file.path, file.lastModified()) {
+        tags = DocStore(LocalContext.current).tags(file)
     }
 
     Scaffold(
@@ -240,7 +243,8 @@ fun PdfViewerScreen(
             )
         },
         confirmButton = {
-            TextButton(onClick = { tagsDialog = false }) { Text("Done") }
-        }
+            TextButton(onClick = { DocStore(LocalContext.current).saveTags(file, tags); tagsDialog = false }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { tagsDialog = false }) { Text("Cancel") } }
     )
 }
