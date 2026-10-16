@@ -148,6 +148,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val shots = remember { mutableStateListOf<Uri>() }
     var flash by remember { mutableStateOf(false) }
     var liveFilter by remember { mutableStateOf(PageFilter.ENHANCE) }
+    var batchFilter by remember { mutableStateOf(PageFilter.ENHANCE) }
     var busy by remember { mutableStateOf(false) }
     var autoOn by remember { mutableStateOf(prefs.autoCapture) }
     var quad by remember { mutableStateOf<FloatArray?>(null) }
@@ -183,7 +184,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     busy = false
                     val u = Uri.fromFile(f)
                     if (mode == CamMode.ID || mode == CamMode.BOOK) onDone(listOf(u), mode, filterNow)
-                    else if (batch && (mode == CamMode.DOCS)) shots.add(u)
+                    else if (batch && (mode == CamMode.DOCS)) { if (shots.isEmpty()) batchFilter = filterNow; shots.add(u) }
                     else onDone(listOf(u), mode, filterNow)
                 }
                 override fun onError(e: ImageCaptureException) {
@@ -267,7 +268,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     }
                 }, ContextCompat.getMainExecutor(c))
             }
-        }, update = { view -> applyLivePreview(view, liveFilter, mode == CamMode.DOCS || mode == CamMode.ID || mode == CamMode.BOOK) })
+        }, update = { view -> applyLivePreview(view, liveFilter, mode == CamMode.DOCS || mode == CamMode.BOOK) })
         val q = quad
         if (q != null) Canvas(Modifier.fillMaxSize()) {
             val bw = size.width; val bh = size.height
@@ -296,11 +297,11 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 Pill("Single", !batch) { onBatch(false) }
                 Pill("Batch", batch) { onBatch(true) }
             }
-            if (mode == CamMode.DOCS || mode == CamMode.ID || mode == CamMode.BOOK) {
+            if (mode == CamMode.DOCS || mode == CamMode.BOOK) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     PageFilter.values().forEach { f ->
-                        Pill(f.label, liveFilter == f) { liveFilter = f }
+                        Pill(f.label, liveFilter == f) { if (shots.isEmpty() || f == batchFilter) liveFilter = f else Toast.makeText(ctx, "Finish this batch before changing its filter.", Toast.LENGTH_SHORT).show() }
                     }
                 }
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -329,7 +330,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 else Box(Modifier.size(84.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
                     .clip(CircleShape).background(Color.White).clickable(enabled = !busy) { shoot() })
                 Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
-                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode, filterNow) }) { Text("Done (${shots.size})") }
+                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode, batchFilter) }) { Text("Done (${shots.size})") }
                 }
             }
         }
