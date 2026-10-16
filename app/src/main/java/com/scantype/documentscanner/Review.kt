@@ -590,16 +590,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     Icon(Icons.Filled.Delete, "Delete page", tint = Color.White)
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = MaterialTheme.colorScheme.primary) }
-                Spacer(Modifier.weight(1f))
-                Text("Page ${cur + 1} of ${r.pages.size}", color = MaterialTheme.colorScheme.onBackground)
-                Spacer(Modifier.weight(1f))
-                TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = MaterialTheme.colorScheme.primary) }
-            }
-            LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
-            }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -610,6 +600,18 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         onClick = { editorTab = tabName },
                         label = { Text(tabName) }
                     )
+                }
+            }
+            if (editorTab == "Page") {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = MaterialTheme.colorScheme.primary) }
+                    Spacer(Modifier.weight(1f))
+                    Text("Page ${cur + 1} of ${r.pages.size}", color = MaterialTheme.colorScheme.onBackground)
+                    Spacer(Modifier.weight(1f))
+                    TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = MaterialTheme.colorScheme.primary) }
+                }
+                LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
                 }
             }
             Row(
