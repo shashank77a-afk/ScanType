@@ -154,7 +154,7 @@ fun App(prefs: Prefs) {
         } else camMode = m
     }
 
-    fun onCaptured(uris: List<Uri>, m: CamMode) {
+    fun onCaptured(uris: List<Uri>, m: CamMode, cameraFilter: PageFilter = PageFilter.ENHANCE) {
         camMode = null
         when (m) {
             CamMode.TEXT -> runOcr(uris, false)
@@ -177,9 +177,9 @@ fun App(prefs: Prefs) {
                     return@launch
                 }
                 val rv = review; val ri = retakeIdx; retakeIdx = null
-                if (rv != null && ri != null && ri < rv.pages.size) rv.replace(ri, out[0])
-                else if (rv != null) rv.add(out)
-                else review = ReviewState(out)
+                if (rv != null && ri != null && ri < rv.pages.size) rv.replace(ri, out[0], cameraFilter)
+                else if (rv != null) rv.add(out, cameraFilter)
+                else review = ReviewState(out, cameraFilter)
             }
         }
     }
@@ -270,7 +270,7 @@ fun App(prefs: Prefs) {
         BackHandler { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null }
         CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs,
             if (cm == CamMode.ID) (if (idSide == 0) "ID Card: scan the FRONT side" else "ID Card: scan the BACK side") else null,
-            { uris, m -> onCaptured(uris, m) },
+            { uris, m, filter -> onCaptured(uris, m, filter) },
             { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null }
         )
         return
