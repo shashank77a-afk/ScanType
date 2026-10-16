@@ -22,14 +22,18 @@
 - [x] Keep Auto Capture on/off and manual shutter controls.
 - [x] Remove the Google ML Kit Document Scanner dependency/fallback entry point.
 - [ ] Add lightweight live Enhance/B&W/Lighten preview without slowing camera frames.
+- [x] Add throttled in-camera low-light and glare guidance; validate on-device in different lighting.
 - [ ] Improve edge stability, low-light/blur warnings, retake flow and manual corner editing.
 - [ ] Test multi-page Add Page/Finish Document, page reorder/delete/rotate and ID front/back end-to-end.
 - [ ] Add Book Mode quality improvements and verify curved-page handling.
 
 ## Phase 3 — Filter engine and editor
 - [x] Add filter choices: Original, Enhance, Lighten, B&W, No Shadow, OmniFix.
-- [ ] Implement and visually validate distinct processing for all six filters; OmniFix must be a clearly defined local page-correction mode, not an alias for another filter.
-- [ ] Add side-by-side/compare preview, reset/undo, and always render filters from the original image.
+- [x] Improve local illumination normalization and B&W thresholding; keep OmniFix as a separate processing path.
+- [x] Add Original comparison toggle and filter Reset action; Original shortcut resets the filter and rotation.
+- [x] Release replaced preview and thumbnail bitmaps when pages/filters change to reduce native-memory pressure.
+- [ ] Visually validate distinct results for all six filters on real photographs; OmniFix must be clearly useful, not merely different in code.
+- [ ] Add undo/redo history and an always-render-from-original processing contract.
 - [ ] Build editor tabs: Images, Markup, Page.
 - [ ] Add tested Crop, Rotate, Signature, Add Text, Brush/Highlight, Watermark and page management actions.
 - [ ] Treat Smart Erase as later/experimental until it can avoid deleting real document content.
@@ -52,4 +56,4 @@
 - [ ] Only mark Phase 5 complete after device testing; CI success alone is not device verification.
 
 ## Current implementation notes
-This branch is an incremental implementation, not yet the finished five-phase release. The theme, initial Home/navigation structure, selected filter names, ScannerAi naming/folder behavior and removal of the Google document-scanner dependency have been started. Live-filter rendering, full preview/editor parity, several advanced PDF actions, complete automated checks, and real-device QA remain outstanding.
+This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, bitmap cleanup, and throttled live lighting/glare hints have been added on top of the theme/navigation/camera/export foundation. Live filtered camera rendering, manual corner editing improvements, a complete Images/Markup/Page editor, tested signature/text/brush/highlight/watermark tools, several advanced PDF actions, and real-device QA remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
