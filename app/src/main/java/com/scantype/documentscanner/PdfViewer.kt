@@ -243,5 +243,4 @@ fun PdfViewerScreen(
             TextButton(onClick = { tagsDialog = false }) { Text("Done") }
         }
     )
-    }
 }
