@@ -51,6 +51,19 @@ import java.util.Date
 import java.util.Locale
 
 /** Pages of one document, each with its original image, filter and rotation. */
+/** Snapshot of reversible page edits. The original input URI is retained so filters never stack. */
+private data class PageEditSnapshot(
+    val page: Uri,
+    val original: Uri,
+    val filter: PageFilter,
+    val rotation: Int,
+    val text: String,
+    val watermark: String,
+    val signature: List<Pair<Float, Float>>,
+    val highlights: List<List<Pair<Float, Float>>>,
+    val brushes: List<List<Pair<Float, Float>>>
+)
+
 class ReviewState(initial: List<Uri>) {
     val pages = mutableStateListOf<Uri>().apply { addAll(initial) }
     val origs = mutableStateListOf<Uri>().apply { addAll(initial) }
@@ -61,17 +74,48 @@ class ReviewState(initial: List<Uri>) {
     val signatures = mutableStateListOf<List<Pair<Float, Float>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val brushes = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    private val undoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
+    private val redoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
             textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList())
+            undoStacks.add(mutableListOf()); redoStacks.add(mutableListOf())
         }
     }
-    fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
+    private fun current(i: Int) = PageEditSnapshot(
+        pages[i], origs[i], filters[i], rots[i], textOverlays[i], watermarks[i],
+        signatures[i].toList(), highlights[i].map { it.toList() }, brushes[i].map { it.toList() }
+    )
+    private fun restore(i: Int, p: PageEditSnapshot) {
+        pages[i] = p.page; origs[i] = p.original; filters[i] = p.filter; rots[i] = p.rotation
+        textOverlays[i] = p.text; watermarks[i] = p.watermark; signatures[i] = p.signature
+        highlights[i] = p.highlights; brushes[i] = p.brushes
+    }
+    fun pushUndo(i: Int) {
+        if (i !in pages.indices) return
+        undoStacks[i].add(current(i))
+        if (undoStacks[i].size > 30) undoStacks[i].removeAt(0)
+        redoStacks[i].clear()
+    }
+    fun canUndo(i: Int) = undoStacks.getOrNull(i)?.isNotEmpty() == true
+    fun canRedo(i: Int) = redoStacks.getOrNull(i)?.isNotEmpty() == true
+    fun undo(i: Int) {
+        if (!canUndo(i)) return
+        redoStacks[i].add(current(i))
+        restore(i, undoStacks[i].removeAt(undoStacks[i].lastIndex))
+    }
+    fun redo(i: Int) {
+        if (!canRedo(i)) return
+        undoStacks[i].add(current(i))
+        restore(i, redoStacks[i].removeAt(redoStacks[i].lastIndex))
+    }
+    fun replace(i: Int, u: Uri) { pushUndo(i); pages[i] = u; origs[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
         textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
+        undoStacks.removeAt(i); redoStacks.removeAt(i)
     }
     fun move(i: Int, d: Int) {
         val j = i + d
@@ -85,6 +129,8 @@ class ReviewState(initial: List<Uri>) {
         val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
         val hi = highlights[i]; highlights[i] = highlights[j]; highlights[j] = hi
         val br = brushes[i]; brushes[i] = brushes[j]; brushes[j] = br
+        val un = undoStacks[i]; undoStacks[i] = undoStacks[j]; undoStacks[j] = un
+        val re = redoStacks[i]; redoStacks[i] = redoStacks[j]; redoStacks[j] = re
     }
 }
 
@@ -396,13 +442,18 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 Text("Same filter for all pages", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Switch(applyAll, { applyAll = it })
             }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { compareOriginal = !compareOriginal }) {
-                    Text(if (compareOriginal) "Showing Original · Return to Filter" else "Compare with Original",
-                        color = MaterialTheme.colorScheme.primary)
+                    Text(if (compareOriginal) "Show Filter" else "Compare", color = MaterialTheme.colorScheme.primary)
                 }
-                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { r.undo(cur); compareOriginal = false }, enabled = r.canUndo(cur)) {
+                    Text("Undo", color = MaterialTheme.colorScheme.primary)
+                }
+                TextButton(onClick = { r.redo(cur); compareOriginal = false }, enabled = r.canRedo(cur)) {
+                    Text("Redo", color = MaterialTheme.colorScheme.primary)
+                }
                 TextButton(onClick = {
+                    r.pushUndo(cur)
                     r.filters[cur] = PageFilter.ORIGINAL
                     r.rots[cur] = 0
                     compareOriginal = false
@@ -413,7 +464,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 items(PageFilter.values().toList()) { f ->
                     val sel = f == flt
                     Column(Modifier.clickable {
-                        if (applyAll) { for (i in r.filters.indices) r.filters[i] = f } else r.filters[cur] = f
+                        if (applyAll) {
+                            for (i in r.filters.indices) if (r.filters[i] != f) { r.pushUndo(i); r.filters[i] = f }
+                        } else if (r.filters[cur] != f) { r.pushUndo(cur); r.filters[cur] = f }
                     }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(Modifier.size(64.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
                             .then(if (sel) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)) {
@@ -452,9 +505,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             }
                         }
                         BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
-                        BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
+                        BarButton(Icons.Filled.RotateLeft, "Rotate") { r.pushUndo(cur); r.rots[cur] = (rot + 270) % 360 }
                         BarButton(Icons.Filled.Image, "Reset") {
-                            r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL
+                            r.pushUndo(cur); r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL
                             r.rots[cur] = 0; compareOriginal = false
                         }
                     }
@@ -502,7 +555,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
         },
         confirmButton = { TextButton({
-            r.textOverlays[cur] = textDraft.take(500)
+            r.pushUndo(cur); r.textOverlays[cur] = textDraft.take(500)
             showTextDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showTextDialog = false }) { Text("Cancel") } }
@@ -520,7 +573,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
         },
         confirmButton = { TextButton({
-            r.watermarks[cur] = watermarkDraft.take(80)
+            r.pushUndo(cur); r.watermarks[cur] = watermarkDraft.take(80)
             showWatermarkDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
@@ -573,6 +626,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         confirmButton = { TextButton({
             val stroke = liveActiveHighlight
             val all = if (stroke.size > 1) liveHighlightDraft + listOf(stroke) else liveHighlightDraft
+            r.pushUndo(cur)
             if (drawingMode == "Brush") r.brushes[cur] = all else r.highlights[cur] = all
             showHighlightDialog = false
         }) { Text("Apply") } },
@@ -619,7 +673,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
         },
         confirmButton = { TextButton({
-            r.signatures[cur] = signatureDraft
+            r.pushUndo(cur); r.signatures[cur] = signatureDraft
             showSignatureDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showSignatureDialog = false }) { Text("Cancel") } }
