@@ -253,9 +253,6 @@ private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onCl
     val bmp by produceState<Bitmap?>(null, uri, rot) {
         value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
     }
-    DisposableEffect(bmp) {
-        onDispose { bmp?.let { image -> if (!image.isRecycled) runCatching { image.recycle() } } }
-    }
     Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
         .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
         bmp?.let { Image(it.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -348,12 +345,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         value = withContext(Dispatchers.Default) {
             runCatching { val b = ImageFilters.load(ctx, page, 500); val m = EdgeDetect.quality(b); b.recycle(); m }.getOrNull()
         }
-    }
-    DisposableEffect(preview) {
-        onDispose { preview?.let { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
-    }
-    DisposableEffect(thumbs) {
-        onDispose { thumbs.values.forEach { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
     }
 
     fun finish() {
@@ -705,6 +696,77 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showSignatureDialog = false }) { Text("Cancel") } }
     )
+    if (fDialog) AlertDialog(
+        onDismissRequest = { if (!saving) fDialog = false },
+        title = { Text("Finish document") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Choose the PDF format to create.")
+                listOf(
+                    0 to "Standard PDF",
+                    1 to "Searchable PDF",
+                    2 to "Original + typed text, page by page",
+                    3 to "Original pages, then typed text"
+                ).forEach { (mode, label) ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable(enabled = !saving) { fMode = mode }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = fMode == mode,
+                            onClick = { fMode = mode },
+                            enabled = !saving
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { fDialog = false; finish() },
+                enabled = !saving
+            ) { Text("Create PDF") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { fDialog = false },
+                enabled = !saving
+            ) { Text("Cancel") }
+        }
+    )
+
+    if (gDialog) AlertDialog(
+        onDismissRequest = { if (!saving) gDialog = false },
+        title = { Text("Save pages to Gallery") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = gAll, onCheckedChange = { gAll = it }, enabled = !saving)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save all pages")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = gPng, onCheckedChange = { gPng = it }, enabled = !saving)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Use PNG format instead of JPEG")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { gDialog = false; saveToGallery() },
+                enabled = !saving
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = { gDialog = false }, enabled = !saving) { Text("Cancel") }
+        }
+    )
+
     if (progress.isNotEmpty()) AlertDialog({}, confirmButton = {}, text = {
         Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(progress) }
     })
