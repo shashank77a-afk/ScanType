@@ -91,7 +91,7 @@ object Export {
      * The suffix check is performed within the destination collection/folder.
      */
     private fun uniqueMediaName(ctx: Context, collection: Uri, relativePath: String, display: String, ext: String): String {
-        val base = display.substringBeforeLast('.', display).ifBlank { "ScannerAi" }
+        val base = display.trim().ifBlank { "ScannerAi" }
         var candidate = "$base.$ext"
         var index = 1
         val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
