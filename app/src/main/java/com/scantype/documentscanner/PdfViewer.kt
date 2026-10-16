@@ -55,7 +55,11 @@ fun PdfViewerScreen(file: File, store: DocStore, onClose: () -> Unit, toast: (St
     }
 
     val pageBitmap by produceState<Bitmap?>(null, file.absolutePath, pageIndex, pageCount) {
-        value = if (pageCount > 0) withContext(Dispatchers.IO) { store.renderPage(file, pageIndex, 1200) } else null
+        val previous = value
+        value = null
+        previous?.recycle()
+        val rendered = if (pageCount > 0) withContext(Dispatchers.IO) { store.renderPage(file, pageIndex, 1200) } else null
+        value = rendered
     }
 
     fun launchExternal(action: String) {
@@ -191,6 +195,9 @@ fun PdfViewerScreen(file: File, store: DocStore, onClose: () -> Unit, toast: (St
 @Composable
 private fun PdfPageThumbnail(file: File, store: DocStore, index: Int, selected: Boolean, onClick: () -> Unit) {
     val bitmap by produceState<Bitmap?>(null, file.absolutePath, file.lastModified(), index) {
+        val previous = value
+        value = null
+        previous?.recycle()
         value = withContext(Dispatchers.IO) { store.renderPage(file, index, 140) }
     }
     Surface(
