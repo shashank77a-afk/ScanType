@@ -143,9 +143,10 @@ private fun compositeMarkup(
     bitmap: Bitmap, text: String, watermark: String,
     signature: List<List<Pair<Float, Float>>> = emptyList(),
     highlights: List<List<Pair<Float, Float>>> = emptyList(),
-    brushes: List<List<Pair<Float, Float>>> = emptyList()
+    brushes: List<List<Pair<Float, Float>>> = emptyList(),
+    erasures: List<List<Pair<Float, Float>>> = emptyList()
 ): Bitmap {
-    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty() && brushes.isEmpty()) return bitmap
+    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty() && brushes.isEmpty() && erasures.isEmpty()) return bitmap
     val canvas = android.graphics.Canvas(bitmap)
     val w = bitmap.width.toFloat()
     val h = bitmap.height.toFloat()
@@ -183,6 +184,25 @@ private fun compositeMarkup(
                 strokeJoin = android.graphics.Paint.Join.ROUND
             }
             canvas.drawPath(path, brushPaint)
+        }
+    }
+    // Manual whiteout strokes: works offline and is included in previews and export.
+    erasures.forEach { stroke ->
+        if (stroke.size > 1) {
+            val path = android.graphics.Path()
+            stroke.forEachIndexed { index, point ->
+                val x = point.first.coerceIn(0f, 1f) * w
+                val y = point.second.coerceIn(0f, 1f) * h
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val erasePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = (w * 0.035f).coerceIn(24f, 68f)
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            canvas.drawPath(path, erasePaint)
         }
     }
     if (watermark.isNotBlank()) {
@@ -323,7 +343,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     if (compareOriginal) "" else r.watermarks[cur],
                     if (compareOriginal) emptyList() else r.signatures[cur],
                     if (compareOriginal) emptyList() else r.highlights[cur],
-                    if (compareOriginal) emptyList() else r.brushes[cur]
+                    if (compareOriginal) emptyList() else r.brushes[cur], r.erasures[cur]
                 )
             }
         }
@@ -338,7 +358,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     PageFilter.values().associateWith { f ->
                         compositeMarkup(
                             ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
-                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]
+                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur]
                         )
                     }
                 } finally {
@@ -363,7 +383,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 runCatching {
                     fun bmp(i: Int) = compositeMarkup(
                         ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
-                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
+                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i], r.erasures[i]
                     )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
@@ -399,7 +419,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     val ok = runCatching {
                         val b = compositeMarkup(
                             ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
-                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
+                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i], r.erasures[i]
                         )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
