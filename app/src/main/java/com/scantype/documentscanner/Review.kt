@@ -520,7 +520,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                                         (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
                                     )
                                 },
-                                onDragEnd = { if (activeHighlight.size > 1) highlightDraft = highlightDraft + listOf(activeHighlight); activeHighlight = emptyList() }
+                                onDragEnd = { val stroke = liveActiveHighlight; if (stroke.size > 1) highlightDraft = liveHighlightDraft + listOf(stroke); activeHighlight = emptyList() }
                             )
                         }
                 ) {
@@ -537,12 +537,13 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     TextButton(onClick = { highlightDraft = emptyList(); activeHighlight = emptyList() }) { Text("Clear") }
-                    TextButton(onClick = { if (activeHighlight.size > 1) highlightDraft = highlightDraft + listOf(activeHighlight); activeHighlight = emptyList() }) { Text("Keep stroke") }
+                    TextButton(onClick = { val stroke = liveActiveHighlight; if (stroke.size > 1) highlightDraft = liveHighlightDraft + listOf(stroke); activeHighlight = emptyList() }) { Text("Keep stroke") }
                 }
             }
         },
         confirmButton = { TextButton({
-            val all = if (activeHighlight.size > 1) highlightDraft + listOf(activeHighlight) else highlightDraft
+            val stroke = liveActiveHighlight
+            val all = if (stroke.size > 1) liveHighlightDraft + listOf(stroke) else liveHighlightDraft
             r.highlights[cur] = all
             showHighlightDialog = false
         }) { Text("Apply") } },
