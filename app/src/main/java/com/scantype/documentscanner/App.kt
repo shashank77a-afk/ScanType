@@ -53,6 +53,7 @@ fun App(prefs: Prefs) {
     val store = remember { DocStore(ctx) }
     var tab by remember { mutableIntStateOf(0) }
     var docs by remember { mutableStateOf(store.list()) }
+    var viewingPdf by remember { mutableStateOf<File?>(null) }
     var editor by remember { mutableStateOf<String?>(null) }
     var editorIsHandwriting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
@@ -219,6 +220,13 @@ fun App(prefs: Prefs) {
         }
     }
 
+    val currentPdf = viewingPdf
+    if (currentPdf != null) {
+        BackHandler { viewingPdf = null }
+        PdfViewerScreen(currentPdf, store, onClose = { viewingPdf = null }, toast = ::toast)
+        return
+    }
+
     aiFail?.let { f ->
         AlertDialog({ aiFail = null }, title = { Text("AI recognition") }, text = { Text(f.message) },
             confirmButton = {
@@ -380,7 +388,7 @@ fun App(prefs: Prefs) {
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
                     { requestAi { openCam(CamMode.HAND) } }, { requestAi { openCam(CamMode.TEXT) } }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
                     { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 2 }, { openCam(CamMode.QR) },
-                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0)
+                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0, onOpenDocument = { viewingPdf = it })
                 2 -> ToolsScreen(sections)
                 else -> MeHub(onAccount = { showAccount = true }, onSettings = { showSettings = true })
             }
