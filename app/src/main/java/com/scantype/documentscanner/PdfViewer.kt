@@ -84,6 +84,7 @@ fun PdfViewerScreen(
     onRename: (String) -> Unit,
     onCheckErrors: () -> Unit
 ) {
+    val context = LocalContext.current
     var page by remember(file.path, file.lastModified()) { mutableIntStateOf(0) }
     var nameDialog by remember(file.path) { mutableStateOf(false) }
     var newName by remember(file.path) { mutableStateOf(file.nameWithoutExtension) }
@@ -97,7 +98,7 @@ fun PdfViewerScreen(
         }
     }
     LaunchedEffect(file.path, file.lastModified()) {
-        tags = DocStore(LocalContext.current).tags(file)
+        tags = DocStore(context).tags(file)
     }
 
     Scaffold(
@@ -113,9 +114,7 @@ fun PdfViewerScreen(
                 navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } },
                 actions = {
                     IconButton(onClick = { nameDialog = true }) { Icon(Icons.Filled.Edit, "Rename document") }
-                    Box {
-                        IconButton(onClick = { tagsDialog = true }) { Icon(Icons.Filled.Label, "Tags") }
-                    }
+                    TextButton(onClick = { tagsDialog = true }) { Text("Tags +") }
                     IconButton(onSave) { Icon(Icons.Filled.Save, "Save") }
                     Box {
                         IconButton(onClick = { moreMenu = true }) { Icon(Icons.Filled.MoreVert, "More") }
@@ -153,11 +152,11 @@ fun PdfViewerScreen(
                     contentAlignment = Alignment.TopStart
                 ) {
                     Column(
-                        Modifier.width(230.dp),
+                        Modifier.width(180.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Card(
-                            modifier = Modifier.fillMaxWidth().height(325.dp),
+                            modifier = Modifier.fillMaxWidth().height(255.dp),
                             shape = RoundedCornerShape(2.dp),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                         ) {
@@ -257,7 +256,7 @@ fun PdfViewerScreen(
             )
         },
         confirmButton = {
-            TextButton(onClick = { DocStore(LocalContext.current).saveTags(file, tags); tagsDialog = false }) { Text("Save") }
+            TextButton(onClick = { DocStore(context).saveTags(file, tags); tagsDialog = false }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = { tagsDialog = false }) { Text("Cancel") } }
     )
