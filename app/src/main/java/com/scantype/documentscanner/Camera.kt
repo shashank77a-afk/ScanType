@@ -71,7 +71,7 @@ private fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 /** ScanType's own camera. Asks for the CAMERA permission itself and explains what to do if it is denied. */
 @Composable
 fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, prefs: Prefs,
-                 hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
+                 hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     fun has() = ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -87,7 +87,7 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     LaunchedEffect(Unit) { if (!granted) ask.launch(Manifest.permission.CAMERA) }
-    if (granted) CameraContent(mode, onMode, batch, onBatch, prefs, hint, onDone, onClose, onSmart)
+    if (granted) CameraContent(mode, onMode, batch, onBatch, prefs, hint, onDone, onClose)
     else Column(Modifier.fillMaxSize().padding(24.dp), Arrangement.Center, Alignment.CenterHorizontally) {
         Text(if (denied) "Camera permission was denied. Allow it to scan with the camera, or choose images from your gallery."
         else "ScanType needs the camera only to photograph your documents. Photos stay on your device.")
@@ -97,14 +97,13 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
         }) { Text("Open app settings") }
         OutlinedButton({ pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) { Text("Choose from gallery") }
-        TextButton(onSmart) { Text("Use the Google scanner instead") }
         TextButton(onClose) { Text("Close") }
     }
 }
 
 @Composable
 private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, prefs: Prefs,
-                          hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit, onSmart: () -> Unit) {
+                          hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     val shots = remember { mutableStateListOf<Uri>() }
@@ -222,7 +221,6 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
-            TextButton(onSmart) { Text("Google scanner", color = Color.White) }
             TextButton({ autoOn = !autoOn; prefs.autoCapture = autoOn }) { Text(if (autoOn) "Auto: ON" else "Auto: OFF", color = if (autoOn) Cyan else Color.White) }
             IconButton({ flash = !flash }) {
                 Icon(if (flash) Icons.Filled.FlashOn else Icons.Filled.FlashOff, "Flash", tint = Color.White)
