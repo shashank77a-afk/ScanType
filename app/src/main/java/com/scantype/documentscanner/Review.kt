@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.RotateLeft
 import androidx.compose.material.icons.filled.TextFields
@@ -34,6 +35,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -55,17 +58,18 @@ class ReviewState(initial: List<Uri>) {
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
     val textOverlays = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
+    val signatures = mutableStateListOf<List<Pair<Float, Float>>>().apply { repeat(initial.size) { add(emptyList()) } }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
-            textOverlays.add(""); watermarks.add("")
+            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList())
         }
     }
     fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
-        textOverlays.removeAt(i); watermarks.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i)
     }
     fun move(i: Int, d: Int) {
         val j = i + d
@@ -76,12 +80,16 @@ class ReviewState(initial: List<Uri>) {
         val r = rots[i]; rots[i] = rots[j]; rots[j] = r
         val t = textOverlays[i]; textOverlays[i] = textOverlays[j]; textOverlays[j] = t
         val wm = watermarks[i]; watermarks[i] = watermarks[j]; watermarks[j] = wm
+        val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
     }
 }
 
 /** Composites annotations into the page bitmap so the same content reaches previews and exports. */
-private fun compositeMarkup(bitmap: Bitmap, text: String, watermark: String): Bitmap {
-    if (text.isBlank() && watermark.isBlank()) return bitmap
+private fun compositeMarkup(
+    bitmap: Bitmap, text: String, watermark: String,
+    signature: List<Pair<Float, Float>> = emptyList()
+): Bitmap {
+    if (text.isBlank() && watermark.isBlank() && signature.isEmpty()) return bitmap
     val canvas = android.graphics.Canvas(bitmap)
     val w = bitmap.width.toFloat()
     val h = bitmap.height.toFloat()
@@ -96,6 +104,22 @@ private fun compositeMarkup(bitmap: Bitmap, text: String, watermark: String): Bi
         canvas.rotate(-24f, w / 2f, h / 2f)
         canvas.drawText(watermark.take(80), w / 2f, h / 2f, paint)
         canvas.restore()
+    }
+    if (signature.size > 1) {
+        val path = android.graphics.Path()
+        signature.forEachIndexed { index, point ->
+            val x = point.first.coerceIn(0f, 1f) * w
+            val y = point.second.coerceIn(0f, 1f) * h
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        val signaturePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(20, 45, 125)
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = (w * 0.006f).coerceIn(4f, 14f)
+            strokeCap = android.graphics.Paint.Cap.ROUND
+            strokeJoin = android.graphics.Paint.Join.ROUND
+        }
+        canvas.drawPath(path, signaturePaint)
     }
     if (text.isNotBlank()) {
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -157,6 +181,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var editorTab by remember { mutableStateOf("Images") }
     var showTextDialog by remember { mutableStateOf(false) }
     var showWatermarkDialog by remember { mutableStateOf(false) }
+    var showSignatureDialog by remember { mutableStateOf(false) }
+    var signatureDraft by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var textDraft by remember { mutableStateOf("") }
     var watermarkDraft by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
@@ -190,7 +216,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 compositeMarkup(
                     ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
                     if (compareOriginal) "" else r.textOverlays[cur],
-                    if (compareOriginal) "" else r.watermarks[cur]
+                    if (compareOriginal) "" else r.watermarks[cur],
+                    if (compareOriginal) emptyList() else r.signatures[cur]
                 )
             }.getOrNull()
         }
@@ -205,7 +232,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     PageFilter.values().associateWith { f ->
                         compositeMarkup(
                             ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
-                            r.textOverlays[cur], r.watermarks[cur]
+                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur]
                         )
                     }
                 } finally {
@@ -228,7 +255,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 runCatching {
                     fun bmp(i: Int) = compositeMarkup(
                         ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
-                        r.textOverlays[i], r.watermarks[i]
+                        r.textOverlays[i], r.watermarks[i], r.signatures[i]
                     )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
@@ -264,7 +291,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     val ok = runCatching {
                         val b = compositeMarkup(
                             ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
-                            r.textOverlays[i], r.watermarks[i]
+                            r.textOverlays[i], r.watermarks[i], r.signatures[i]
                         )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
@@ -384,6 +411,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         BarButton(Icons.Filled.TextFields, "Add Text") {
                             textDraft = r.textOverlays[cur]; showTextDialog = true
                         }
+                        BarButton(Icons.Filled.Edit, "Signature") {
+                            signatureDraft = r.signatures[cur]; showSignatureDialog = true
+                        }
                         BarButton(Icons.Filled.Image, "Watermark") {
                             watermarkDraft = r.watermarks[cur]; showWatermarkDialog = true
                         }
@@ -435,6 +465,52 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             showWatermarkDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
+    )
+    if (showSignatureDialog) AlertDialog(
+        onDismissRequest = { showSignatureDialog = false },
+        title = { Text("Draw signature") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Draw with your finger. The signature will be placed on the current page and included in exports.")
+                androidx.compose.foundation.Canvas(
+                    Modifier.fillMaxWidth().height(180.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { p ->
+                                    signatureDraft = signatureDraft + listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val p = change.position
+                                    signatureDraft = signatureDraft + listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                }
+                            )
+                        }
+                ) {
+                    if (signatureDraft.size > 1) {
+                        val path = androidx.compose.ui.graphics.Path()
+                        signatureDraft.forEachIndexed { i, p ->
+                            val x = p.first * size.width
+                            val y = p.second * size.height
+                            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                        }
+                        drawPath(path, Color(0xFF142D7D), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
+                    }
+                }
+                TextButton(onClick = { signatureDraft = emptyList() }) { Text("Clear signature") }
+            }
+        },
+        confirmButton = { TextButton({
+            r.signatures[cur] = signatureDraft
+            showSignatureDialog = false
+        }) { Text("Apply") } },
+        dismissButton = { TextButton({ showSignatureDialog = false }) { Text("Cancel") } }
     )
     if (gDialog) AlertDialog({ gDialog = false }, title = { Text("Save to Gallery") },
         text = {
