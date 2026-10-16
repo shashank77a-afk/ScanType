@@ -558,7 +558,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f
             },
             onCancel = {
-                filterPanelOriginals.forEach { (i, old) -> if (i in r.filters.indices) r.filters[i] = old }
                 filterPanelOriginals.keys.forEach { i -> if (r.canUndo(i)) r.undo(i) }
                 compareOriginal = false
                 showFilterPanel = false
