@@ -145,19 +145,27 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList(); val name = r.title; val mode = fMode
         scope.launch {
             saving = true
-            val ok = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 runCatching {
                     fun bmp(i: Int) = ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i])
-                    when (mode) {
+                    val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
-                        1 -> PdfBuilders.searchable(store.newFileExt(name, "pdf"), pages.size) { bmp(it) }
-                        else -> PdfBuilders.originalPlusTyped(ctx, store.newFileExt(name, "pdf"), pages.size, pickEngine(prefs, false),
-                            mode == 2, { bmp(it) }) { p -> progress = "Reading page $p of ${pages.size}…" }
+                        1 -> store.newFileExt(name, "pdf").also { PdfBuilders.searchable(it, pages.size) { i -> bmp(i) } }
+                        else -> store.newFileExt(name, "pdf").also { out ->
+                            PdfBuilders.originalPlusTyped(ctx, out, pages.size, pickEngine(prefs, false),
+                                mode == 2, { i -> bmp(i) }) { p -> progress = "Reading page $p of ${pages.size}…" }
+                        }
                     }
-                }.isSuccess
+                    val exported = Export.saveToDownloads(ctx, saved, saved.name, "application/pdf")
+                    saved to exported
+                }.getOrNull()
             }
             saving = false; progress = ""
-            if (ok) onSaved() else snack.showSnackbar("PDF creation failed. Please try again.")
+            if (result != null) {
+                if (result.second) snack.showSnackbar("PDF saved to Download/ScannerAi.")
+                else snack.showSnackbar("PDF saved in Scanner.ai, but could not copy it to Download/ScannerAi.")
+                onSaved()
+            } else snack.showSnackbar("PDF creation failed. Please try again.")
         }
     }
 
