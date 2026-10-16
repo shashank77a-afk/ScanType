@@ -40,11 +40,14 @@ private fun nearest(pts: List<Offset>, o: Offset, sz: IntSize): Int {
 fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCancel: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val bmp by produceState<Bitmap?>(null, uri, rot) {
+    var loadRetry by remember { mutableIntStateOf(0) }
+    val cropState by produceState<Result<Bitmap>?>(null, uri, rot, loadRetry) {
+        value = null
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1400), rot) }.getOrNull()
+            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1200), rot) }
         }
     }
+    val bmp = cropState?.getOrNull()
     DisposableEffect(bmp) {
         onDispose { bmp?.let { image -> if (!image.isRecycled) runCatching { image.recycle() } } }
     }
@@ -73,8 +76,14 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
                 fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp))
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                 val b = bmp
-                if (b == null) CircularProgressIndicator(color = Cyan)
-                else {
+                if (b == null) {
+                    if (cropState == null) CircularProgressIndicator(color = Cyan)
+                    else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Could not load this page.", color = Color.White)
+                        TextButton(onClick = { loadRetry++ }) { Text("Retry", color = Cyan) }
+                        TextButton(onCancel) { Text("Cancel", color = Cyan) }
+                    }
+                } else {
                     val ar = b.width.toFloat() / b.height
                     val w = if (maxWidth / maxHeight > ar) maxHeight * ar else maxWidth
                     val h = w / ar
