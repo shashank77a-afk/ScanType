@@ -45,6 +45,9 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
             runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 2000), rot) }.getOrNull()
         }
     }
+    DisposableEffect(bmp) {
+        onDispose { bmp?.let { image -> if (!image.isRecycled) runCatching { image.recycle() } } }
+    }
     val pts = remember { mutableStateListOf(Offset(0.06f, 0.06f), Offset(0.94f, 0.06f), Offset(0.94f, 0.94f), Offset(0.06f, 0.94f)) }
     var working by remember { mutableStateOf(false) }
     fun auto(manual: Boolean) {
