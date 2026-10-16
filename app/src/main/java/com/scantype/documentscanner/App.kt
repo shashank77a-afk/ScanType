@@ -294,6 +294,30 @@ fun App(prefs: Prefs) {
                         toast(if (ok) "Saved to Downloads/ScannerAi" else "Could not save this PDF.")
                     }
                 }
+            },
+            onAddPages = {
+                scope.launch {
+                    busy = "Preparing PDF pages…"
+                    val pages = withContext(Dispatchers.IO) { runCatching { store.renderPdfPagesForEditing(vf) } }
+                    busy = null
+                    pages.onSuccess { uris ->
+                        editSourcePdf = vf
+                        editPageUris = uris
+                        viewerFile = null
+                        review = ReviewState(uris, PageFilter.ORIGINAL)
+                        toast("Add pages to the document, then save as a new PDF.")
+                    }.onFailure { toast("Could not prepare pages for editing.") }
+                }
+            },
+            onRename = { name ->
+                store.rename(vf, name)
+                refresh()
+                viewerFile = null
+                toast("Document renamed.")
+            },
+            onCheckErrors = {
+                val uri = store.uri(vf)
+                runOcr(listOf(uri), false)
             }
         )
         return
