@@ -23,7 +23,8 @@
 - [x] Remove the Google ML Kit Document Scanner dependency/fallback entry point.
 - [ ] Add lightweight live Enhance/B&W/Lighten preview without slowing camera frames.
 - [x] Add throttled in-camera low-light and glare guidance; validate on-device in different lighting.
-- [ ] Improve edge stability, low-light/blur warnings, retake flow and manual corner editing.
+- [x] Add throttled live low-light/glare hints; existing Review quality warning catches blur and existing CropScreen provides draggable four-corner perspective correction (real-device tuning remains).
+- [ ] Improve edge stability and verify the retake/manual-corner workflow under difficult lighting.
 - [ ] Test multi-page Add Page/Finish Document, page reorder/delete/rotate and ID front/back end-to-end.
 - [ ] Add Book Mode quality improvements and verify curved-page handling.
 
@@ -33,9 +34,10 @@
 - [x] Add Original comparison toggle and filter Reset action; Original shortcut resets the filter and rotation.
 - [x] Release replaced preview and thumbnail bitmaps when pages/filters change to reduce native-memory pressure.
 - [ ] Visually validate distinct results for all six filters on real photographs; OmniFix must be clearly useful, not merely different in code.
-- [ ] Add undo/redo history and an always-render-from-original processing contract.
-- [ ] Build editor tabs: Images, Markup, Page.
-- [ ] Add tested Crop, Rotate, Signature, Add Text, Brush/Highlight, Watermark and page management actions.
+- [x] Add an Original comparison toggle and Reset action; page previews are regenerated from the source URI rather than repeatedly filtering a prior result.
+- [ ] Add undo/redo history.
+- [x] Add editor tabs: Images, Markup, Page.
+- [x] Implement Crop, Rotate, signature drawing, Add Text, Brush/Highlight, Watermark and page add/delete/reorder controls; these still need real-device workflow testing.
 - [ ] Treat Smart Erase as later/experimental until it can avoid deleting real document content.
 
 ## Phase 4 — PDF tools and AI
@@ -56,4 +58,4 @@
 - [ ] Only mark Phase 5 complete after device testing; CI success alone is not device verification.
 
 ## Current implementation notes
-This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, bitmap cleanup, and throttled live lighting/glare hints have been added on top of the theme/navigation/camera/export foundation. Live filtered camera rendering, manual corner editing improvements, a complete Images/Markup/Page editor, tested signature/text/brush/highlight/watermark tools, several advanced PDF actions, and real-device QA remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
+This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, bitmap cleanup, live lighting/glare hints, Images/Markup/Page tabs, and page-aware text/signature/brush/highlight/watermark overlays have been added. Live filtered camera rendering, undo/redo, broader edge tuning, several advanced PDF actions, on-device annotation/filter QA, and full regression testing remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
