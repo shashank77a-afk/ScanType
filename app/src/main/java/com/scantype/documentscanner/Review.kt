@@ -43,6 +43,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Pages of one document, each with its original image, filter and rotation. */
 class ReviewState(initial: List<Uri>) {
@@ -50,7 +53,7 @@ class ReviewState(initial: List<Uri>) {
     val origs = mutableStateListOf<Uri>().apply { addAll(initial) }
     val filters = mutableStateListOf<PageFilter>().apply { repeat(initial.size) { add(PageFilter.ENHANCE) } }
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
-    var title by mutableStateOf("Scan_" + stamp())
+    var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
         u.forEach { pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0) }
     }
@@ -178,7 +181,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 count
             }
             saving = false
-            snack.showSnackbar(if (n > 0) "Saved $n image(s) to Gallery (Pictures/ScanType)" else "Could not save to Gallery. Please try again.")
+            snack.showSnackbar(if (n > 0) "Saved $n image(s) to Gallery (Pictures/ScannerAi)" else "Could not save to Gallery. Please try again.")
         }
     }
 
@@ -258,7 +261,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     if (gDialog) AlertDialog({ gDialog = false }, title = { Text("Save to Gallery") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Saves the edited image(s) to your phone's Gallery, in the folder Pictures/ScanType.")
+                Text("Saves the edited image(s) to your phone's Gallery, in the folder Pictures/ScannerAi.")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(!gPng, { gPng = false }, { Text("JPG") })
                     FilterChip(gPng, { gPng = true }, { Text("PNG") })
