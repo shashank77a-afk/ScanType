@@ -59,17 +59,18 @@ class ReviewState(initial: List<Uri>) {
     val textOverlays = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val signatures = mutableStateListOf<List<Pair<Float, Float>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
-            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList())
+            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList())
         }
     }
     fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
-        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i)
     }
     fun move(i: Int, d: Int) {
         val j = i + d
@@ -81,18 +82,38 @@ class ReviewState(initial: List<Uri>) {
         val t = textOverlays[i]; textOverlays[i] = textOverlays[j]; textOverlays[j] = t
         val wm = watermarks[i]; watermarks[i] = watermarks[j]; watermarks[j] = wm
         val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
+        val hi = highlights[i]; highlights[i] = highlights[j]; highlights[j] = hi
     }
 }
 
 /** Composites annotations into the page bitmap so the same content reaches previews and exports. */
 private fun compositeMarkup(
     bitmap: Bitmap, text: String, watermark: String,
-    signature: List<Pair<Float, Float>> = emptyList()
+    signature: List<Pair<Float, Float>> = emptyList(),
+    highlights: List<List<Pair<Float, Float>>> = emptyList()
 ): Bitmap {
-    if (text.isBlank() && watermark.isBlank() && signature.isEmpty()) return bitmap
+    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty()) return bitmap
     val canvas = android.graphics.Canvas(bitmap)
     val w = bitmap.width.toFloat()
     val h = bitmap.height.toFloat()
+    highlights.forEach { stroke ->
+        if (stroke.size > 1) {
+            val path = android.graphics.Path()
+            stroke.forEachIndexed { index, point ->
+                val x = point.first.coerceIn(0f, 1f) * w
+                val y = point.second.coerceIn(0f, 1f) * h
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val highlightPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.argb(92, 255, 218, 0)
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = (w * 0.028f).coerceIn(14f, 42f)
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            canvas.drawPath(path, highlightPaint)
+        }
+    }
     if (watermark.isNotBlank()) {
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.argb(105, 90, 90, 90)
@@ -183,9 +204,13 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var showWatermarkDialog by remember { mutableStateOf(false) }
     var showSignatureDialog by remember { mutableStateOf(false) }
     var signatureDraft by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
+    var showHighlightDialog by remember { mutableStateOf(false) }
+    var highlightDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
+    var activeHighlight by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var textDraft by remember { mutableStateOf("") }
     var watermarkDraft by remember { mutableStateOf("") }
     val liveSignatureDraft by rememberUpdatedState(signatureDraft)
+    val liveActiveHighlight by rememberUpdatedState(activeHighlight)
     var saving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var gDialog by remember { mutableStateOf(false) }
@@ -218,7 +243,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
                     if (compareOriginal) "" else r.textOverlays[cur],
                     if (compareOriginal) "" else r.watermarks[cur],
-                    if (compareOriginal) emptyList() else r.signatures[cur]
+                    if (compareOriginal) emptyList() else r.signatures[cur],
+                    if (compareOriginal) emptyList() else r.highlights[cur]
                 )
             }.getOrNull()
         }
@@ -233,7 +259,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     PageFilter.values().associateWith { f ->
                         compositeMarkup(
                             ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
-                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur]
+                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur]
                         )
                     }
                 } finally {
@@ -256,7 +282,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 runCatching {
                     fun bmp(i: Int) = compositeMarkup(
                         ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
-                        r.textOverlays[i], r.watermarks[i], r.signatures[i]
+                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i]
                     )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
@@ -292,7 +318,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     val ok = runCatching {
                         val b = compositeMarkup(
                             ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
-                            r.textOverlays[i], r.watermarks[i], r.signatures[i]
+                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i]
                         )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
@@ -415,6 +441,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         BarButton(Icons.Filled.Edit, "Signature") {
                             signatureDraft = r.signatures[cur]; showSignatureDialog = true
                         }
+                        BarButton(Icons.Filled.Edit, "Highlight") {
+                            highlightDraft = r.highlights[cur]; activeHighlight = emptyList(); showHighlightDialog = true
+                        }
                         BarButton(Icons.Filled.Image, "Watermark") {
                             watermarkDraft = r.watermarks[cur]; showWatermarkDialog = true
                         }
@@ -466,6 +495,58 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             showWatermarkDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
+    )
+    if (showHighlightDialog) AlertDialog(
+        onDismissRequest = { showHighlightDialog = false },
+        title = { Text("Highlight page") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Draw over the area to highlight. You can add more than one stroke.")
+                androidx.compose.foundation.Canvas(
+                    Modifier.fillMaxWidth().height(180.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { p ->
+                                    activeHighlight = listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val p = change.position
+                                    activeHighlight = liveActiveHighlight + listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDragEnd = { if (activeHighlight.size > 1) highlightDraft = highlightDraft + listOf(activeHighlight); activeHighlight = emptyList() }
+                            )
+                        }
+                ) {
+                    (highlightDraft + listOf(activeHighlight)).forEach { stroke ->
+                        if (stroke.size > 1) {
+                            val path = androidx.compose.ui.graphics.Path()
+                            stroke.forEachIndexed { i, p ->
+                                val x = p.first * size.width; val y = p.second * size.height
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            drawPath(path, Color(0xCCFFD600), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 14.dp.toPx()))
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = { highlightDraft = emptyList(); activeHighlight = emptyList() }) { Text("Clear") }
+                    TextButton(onClick = { if (activeHighlight.size > 1) highlightDraft = highlightDraft + listOf(activeHighlight); activeHighlight = emptyList() }) { Text("Keep stroke") }
+                }
+            }
+        },
+        confirmButton = { TextButton({
+            val all = if (activeHighlight.size > 1) highlightDraft + listOf(activeHighlight) else highlightDraft
+            r.highlights[cur] = all
+            showHighlightDialog = false
+        }) { Text("Apply") } },
+        dismissButton = { TextButton({ showHighlightDialog = false }) { Text("Cancel") } }
     )
     if (showSignatureDialog) AlertDialog(
         onDismissRequest = { showSignatureDialog = false },
