@@ -1,6 +1,7 @@
 package com.scantype.documentscanner
 
 import android.graphics.Bitmap
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -511,6 +512,44 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
 
+    fun shareCurrentPdf() {
+        val pages = r.pages.toList()
+        val filters = r.filters.toList()
+        val rotations = r.rots.toList()
+        val texts = r.textOverlays.toList()
+        val watermarks = r.watermarks.toList()
+        val signatures = r.signatures.toList()
+        val highlights = r.highlights.toList()
+        val brushes = r.brushes.toList()
+        val erasures = r.erasures.toList()
+        val name = r.title
+        scope.launch {
+            saving = true
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    store.bitmapsToPdf(pages.size, name) { i ->
+                        compositeMarkup(
+                            ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1200), rotations[i]), filters[i]),
+                            texts[i], watermarks[i], signatures[i], highlights[i], brushes[i], erasures[i]
+                        )
+                    }
+                }.getOrNull()
+            }
+            saving = false
+            if (file == null) {
+                snack.showSnackbar("Could not prepare PDF for sharing.")
+            } else {
+                val uri = store.uri(file)
+                val intent = Intent(Intent.ACTION_SEND)
+                    .setType("application/pdf")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { ctx.startActivity(Intent.createChooser(intent, "Share PDF")) }
+                    .onFailure { snack.showSnackbar("Could not open sharing options.") }
+            }
+        }
+    }
+
     fun saveToGallery() {
         val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList()
         val name = r.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Scan" }
@@ -574,7 +613,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 BasicTextField(r.title, { r.title = it }, Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
                     .background(Color(0x22FFFFFF)).padding(horizontal = 12.dp, vertical = 10.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 17.sp), singleLine = true, cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
+                TextButton(onClick = { shareCurrentPdf() }, enabled = !saving) { Text("Share") }
+                Spacer(Modifier.width(4.dp))
                 Button({ fDialog = true }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) {
                     Text(if (saving) "Working…" else "Finish")
                 }
