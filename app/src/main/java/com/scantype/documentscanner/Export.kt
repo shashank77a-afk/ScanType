@@ -183,7 +183,7 @@ object Export {
             val ext = name.substringAfterLast('.', "pdf")
             val freeName = uniqueDisplayName(ctx, MediaStore.Downloads.EXTERNAL_CONTENT_URI, name, ext, dir)
             val d = File(dir, freeName)
-            FileInputStream(f).use { i -> d.outputStream().use { i.copyTo(o = it) } }
+            FileInputStream(f).use { i -> d.outputStream().use { i.copyTo(it) } }
             MediaScannerConnection.scanFile(ctx, arrayOf(d.path), arrayOf(mime), null)
         }
         true
