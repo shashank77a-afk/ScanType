@@ -27,7 +27,8 @@ class DocStore(private val ctx: Context) {
 
     private fun newFile(prefix: String): File {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return File(dir, "${prefix}_$ts.pdf")
+        // Two exports can finish within the same second; never overwrite an earlier document.
+        return unique("${prefix}_$ts")
     }
     private fun clean(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     private fun unique(base: String): File {
@@ -55,7 +56,7 @@ class DocStore(private val ctx: Context) {
         val s = sidecar(f)
         if (f.renameTo(t) && s.exists()) s.renameTo(File(f.parentFile, "$c.txt"))
     }
-    fun duplicate(f: File) { f.copyTo(File(f.parentFile, "${f.nameWithoutExtension}_copy.pdf"), overwrite = true) }
+    fun duplicate(f: File) { f.copyTo(unique("${f.nameWithoutExtension}_copy"), overwrite = false) }
     fun delete(f: File) { f.delete(); sidecar(f).delete() }
     fun folders(): List<String> =
         (listOf("School", "Personal", "Office", "Notes", "Certificates", "Other") +

@@ -86,26 +86,54 @@ object Export {
         }
     }
 
+    /**
+     * Generate a collision-free display name without overwriting previous exports.
+     * The suffix check is performed within the destination collection/folder.
+     */
+    private fun uniqueMediaName(ctx: Context, collection: Uri, relativePath: String, display: String, ext: String): String {
+        val base = display.trim().ifBlank { "ScannerAi" }
+        var candidate = "$base.$ext"
+        var index = 1
+        val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
+        while (true) {
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+            val exists = runCatching {
+                ctx.contentResolver.query(collection, projection, selection, arrayOf(candidate, relativePath), null)?.use { it.moveToFirst() } ?: false
+            }.getOrDefault(false)
+            if (!exists) return candidate
+            candidate = "${base}_${index++}.$ext"
+        }
+    }
+
     fun saveImage(ctx: Context, bmp: Bitmap, display: String, png: Boolean): Boolean = runCatching {
         val mime = if (png) "image/png" else "image/jpeg"
         val ext = if (png) "png" else "jpg"
         val fmt = if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG
         if (Build.VERSION.SDK_INT >= 29) {
+            val cr = ctx.contentResolver
+            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val relative = Environment.DIRECTORY_PICTURES + "/ScannerAi/"
+            val name = uniqueMediaName(ctx, collection, relative, display, ext)
             val v = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "$display.$ext")
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
                 put(MediaStore.Images.Media.MIME_TYPE, mime)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ScannerAi")
+                put(MediaStore.Images.Media.RELATIVE_PATH, relative)
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
-            val cr = ctx.contentResolver
-            val uri = cr.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), v)!!
-            cr.openOutputStream(uri)!!.use { bmp.compress(fmt, 95, it) }
-            cr.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            val uri = cr.insert(collection, v) ?: error("Could not create gallery item")
+            try {
+                cr.openOutputStream(uri)?.use { if (!bmp.compress(fmt, 95, it)) error("Image encoding failed") }
+                    ?: error("Could not open gallery output")
+                cr.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            } catch (e: Exception) {
+                cr.delete(uri, null, null)
+                throw e
+            }
         } else {
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ScannerAi").apply { mkdirs() }
             var f = File(dir, "$display.$ext"); var n = 1
             while (f.exists()) f = File(dir, "${display}_${n++}.$ext")
-            f.outputStream().use { bmp.compress(fmt, 95, it) }
+            f.outputStream().use { if (!bmp.compress(fmt, 95, it)) error("Image encoding failed") }
             MediaScannerConnection.scanFile(ctx, arrayOf(f.path), arrayOf(mime), null)
         }
         true
@@ -119,9 +147,10 @@ object Export {
                 for (i in 0 until r.pageCount) r.openPage(i).use { p ->
                     val w = 1600; val h = (w * p.height.toFloat() / p.width).toInt()
                     val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
-                    p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    if (saveImage(ctx, b, "${f.nameWithoutExtension}_${i + 1}", png)) n++
-                    b.recycle()
+                    try {
+                        p.render(b, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        if (saveImage(ctx, b, "${f.nameWithoutExtension}_${i + 1}", png)) n++
+                    } finally { b.recycle() }
                 }
             }
         }
@@ -130,20 +159,43 @@ object Export {
 
     fun saveToDownloads(ctx: Context, f: File, name: String, mime: String): Boolean = runCatching {
         if (Build.VERSION.SDK_INT >= 29) {
+            val cr = ctx.contentResolver
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val relative = Environment.DIRECTORY_DOWNLOADS + "/ScannerAi/"
+            val base = name.substringBeforeLast('.', name).ifBlank { "ScannerAi" }
+            val ext = name.substringAfterLast('.', "")
+            var candidate = name
+            var index = 1
+            while (true) {
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+                val exists = runCatching {
+                    cr.query(collection, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), selection, arrayOf(candidate, relative), null)?.use { it.moveToFirst() } ?: false
+                }.getOrDefault(false)
+                if (!exists) break
+                candidate = if (ext.isBlank()) "${base}_${index++}" else "${base}_${index++}.$ext"
+            }
             val v = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.DISPLAY_NAME, candidate)
                 put(MediaStore.Downloads.MIME_TYPE, mime)
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ScannerAi")
+                put(MediaStore.Downloads.RELATIVE_PATH, relative)
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
-            val cr = ctx.contentResolver
-            val uri = cr.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)!!
-            cr.openOutputStream(uri)!!.use { o -> FileInputStream(f).use { it.copyTo(o) } }
-            cr.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            val uri = cr.insert(collection, v) ?: error("Could not create download")
+            try {
+                cr.openOutputStream(uri)?.use { o -> FileInputStream(f).use { it.copyTo(o) } }
+                    ?: error("Could not open download output")
+                cr.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
+            } catch (e: Exception) {
+                cr.delete(uri, null, null)
+                throw e
+            }
         } else {
             val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "ScannerAi").apply { mkdirs() }
-            val d = File(dir, name)
-            FileInputStream(f).use { i -> d.outputStream().use { i.copyTo(it) } }
+            val base = name.substringBeforeLast('.', name)
+            val ext = name.substringAfterLast('.', "")
+            var d = File(dir, name); var n = 1
+            while (d.exists()) d = File(dir, if (ext.isBlank()) "${base}_${n++}" else "${base}_${n++}.$ext")
+            FileInputStream(f).use { i -> d.outputStream().use { o -> i.copyTo(o) } }
             MediaScannerConnection.scanFile(ctx, arrayOf(d.path), arrayOf(mime), null)
         }
         true
