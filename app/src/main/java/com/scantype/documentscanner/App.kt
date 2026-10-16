@@ -66,6 +66,7 @@ fun App(prefs: Prefs) {
     var idCropUri by remember { mutableStateOf<Uri?>(null) }
     var idCropRot by remember { mutableIntStateOf(0) }
     var toolStart by remember { mutableStateOf<Tool?>(null) }
+    var viewerFile by remember { mutableStateOf<File?>(null) }
     var studio by remember { mutableStateOf<StudioInit?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var aiHint by remember { mutableStateOf(false) }
@@ -237,6 +238,36 @@ fun App(prefs: Prefs) {
         AccountScreen(prefs, snack, scope, onSignedIn = { finishSignIn() }) { showAccount = false }
         return
     }
+    val vf = viewerFile
+    if (vf != null) {
+        BackHandler { viewerFile = null }
+        PdfViewerScreen(
+            file = vf,
+            onBack = { viewerFile = null },
+            onEditPages = { viewerFile = null; toolStart = Tool.DELETE },
+            onOpenExternal = {
+                val uri = store.uri(vf)
+                val intent = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/pdf")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { ctx.startActivity(intent) }.onFailure { toast("No compatible PDF app found.") }
+            },
+            onShare = { shareFiles(listOf(vf)) },
+            onPrint = { Export.print(ctx, vf, vf.nameWithoutExtension) },
+            onSave = {
+                gate {
+                    scope.launch {
+                        busy = "Saving to Downloads…"
+                        val ok = withContext(Dispatchers.IO) {
+                            Export.saveToDownloads(ctx, vf, vf.name, "application/pdf")
+                        }
+                        busy = null
+                        toast(if (ok) "Saved to Downloads/ScannerAi" else "Could not save this PDF.")
+                    }
+                }
+            }
+        )
+        return
+    }
     val ts = toolStart
     if (ts != null) {
         BackHandler { toolStart = null }
@@ -380,7 +411,7 @@ fun App(prefs: Prefs) {
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
                     { requestAi { openCam(CamMode.HAND) } }, { requestAi { openCam(CamMode.TEXT) } }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
                     { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 2 }, { openCam(CamMode.QR) },
-                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0)
+                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0, onOpenDoc = { viewerFile = it })
                 2 -> ToolsScreen(sections)
                 else -> MeHub(onAccount = { showAccount = true }, onSettings = { showSettings = true })
             }
