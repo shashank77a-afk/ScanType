@@ -43,12 +43,15 @@ fun PdfViewerScreen(file: File, store: DocStore, onClose: () -> Unit, toast: (St
     val scope = rememberCoroutineScope()
     var pageCount by remember(file.absolutePath, file.lastModified()) { mutableIntStateOf(0) }
     var pageIndex by remember(file.absolutePath) { mutableIntStateOf(0) }
+    var loading by remember(file.absolutePath, file.lastModified()) { mutableStateOf(true) }
     var menu by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
 
     LaunchedEffect(file.absolutePath, file.lastModified()) {
+        loading = true
         pageCount = withContext(Dispatchers.IO) { store.pageCount(file) }
         pageIndex = 0
+        loading = false
     }
 
     val pageBitmap by produceState<Bitmap?>(null, file.absolutePath, pageIndex, pageCount) {
@@ -142,7 +145,11 @@ fun PdfViewerScreen(file: File, store: DocStore, onClose: () -> Unit, toast: (St
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (pageCount <= 0) {
+            if (loading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (pageCount <= 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("This PDF could not be read.", color = MaterialTheme.colorScheme.error)
                 }
