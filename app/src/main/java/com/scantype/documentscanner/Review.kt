@@ -300,6 +300,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var signatureDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
     var activeSignature by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var showHighlightDialog by remember { mutableStateOf(false) }
+    var showEraseDialog by remember { mutableStateOf(false) }
     var drawingMode by remember { mutableStateOf("Highlight") }
     var highlightDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
     var activeHighlight by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
@@ -552,12 +553,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             textDraft = r.textOverlays[cur]; showTextDialog = true
                         }
                         BarButton(Icons.Filled.Delete, "Smart Erase") {
-                            textDraft = ""
-                            r.pushUndo(cur)
-                            r.textOverlays[cur] = ""
-                            // Existing overlays can be removed non-destructively. Pixel-level
-                            // erasing of scanned source content needs a dedicated inpainting engine.
-                            scope.launch { snack.showSnackbar("Added text overlay cleared. Source scan remains unchanged.") }
+                            activeHighlight = emptyList()
+                            highlightDraft = r.erasures[cur]
+                            showEraseDialog = true
                         }
                     }
                     "Markup" -> {
@@ -665,6 +663,62 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             showWatermarkDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
+    )
+    if (showEraseDialog) AlertDialog(
+        onDismissRequest = { showEraseDialog = false },
+        title = { Text("Smart Erase") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Draw over content to cover it with white. This works offline; it hides marks rather than reconstructing the background.")
+                androidx.compose.foundation.Canvas(
+                    Modifier.fillMaxWidth().height(220.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White)
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { p ->
+                                    activeHighlight = listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val p = change.position
+                                    activeHighlight = liveActiveHighlight + listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDragEnd = {
+                                    val stroke = liveActiveHighlight
+                                    if (stroke.size > 1) highlightDraft = liveHighlightDraft + listOf(stroke)
+                                    activeHighlight = emptyList()
+                                }
+                            )
+                        }
+                ) {
+                    (highlightDraft + listOf(activeHighlight)).forEach { stroke ->
+                        if (stroke.size > 1) {
+                            val path = androidx.compose.ui.graphics.Path()
+                            stroke.forEachIndexed { i, p ->
+                                val x = p.first * size.width; val y = p.second * size.height
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            drawPath(path, Color.White, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 24.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                        }
+                    }
+                }
+                TextButton(onClick = { highlightDraft = emptyList(); activeHighlight = emptyList() }) { Text("Clear") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                r.pushUndo(cur)
+                r.erasures[cur] = highlightDraft + listOf(activeHighlight).filter { it.size > 1 }
+                activeHighlight = emptyList()
+                showEraseDialog = false
+            }) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = { showEraseDialog = false; activeHighlight = emptyList() }) { Text("Cancel") } }
     )
     if (showHighlightDialog) AlertDialog(
         onDismissRequest = { showHighlightDialog = false },
