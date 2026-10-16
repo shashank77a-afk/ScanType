@@ -41,10 +41,11 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var loadRetry by remember { mutableIntStateOf(0) }
-    val cropState by produceState<Result<Bitmap>?>(null, uri, rot, loadRetry) {
+    var cropRotation by remember(uri, rot) { mutableIntStateOf(rot) }
+    val cropState by produceState<Result<Bitmap>?>(null, uri, cropRotation, loadRetry) {
         value = null
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1200), rot) }
+            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1200), cropRotation) }
         }
     }
     val bmp = cropState?.getOrNull()
@@ -66,11 +67,6 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                TextButton({ auto(true) }) { Text("Auto", color = Cyan) }
-                TextButton({
-                    pts[0] = Offset(0.06f, 0.06f); pts[1] = Offset(0.94f, 0.06f)
-                    pts[2] = Offset(0.94f, 0.94f); pts[3] = Offset(0.06f, 0.94f)
-                }) { Text("Reset", color = Cyan) }
             }
             Text("Drag the 4 corners to fit the edges of the document.", color = Color.White.copy(alpha = 0.8f),
                 fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp))
@@ -108,6 +104,15 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
                         }
                     }
                 }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(onClick = { cropRotation = (cropRotation + 270) % 360 }) { Text("Left", color = Cyan) }
+                TextButton(onClick = { cropRotation = (cropRotation + 90) % 360 }) { Text("Right", color = Cyan) }
+                TextButton(onClick = { auto(true) }) { Text("Auto Crop", color = Cyan) }
+                TextButton(onClick = {
+                    pts[0] = Offset(0.01f, 0.01f); pts[1] = Offset(0.99f, 0.01f)
+                    pts[2] = Offset(0.99f, 0.99f); pts[3] = Offset(0.01f, 0.99f)
+                }) { Text("All", color = Cyan) }
             }
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onCancel, Modifier.weight(1f)) { Text("Cancel", color = Color.White) }
