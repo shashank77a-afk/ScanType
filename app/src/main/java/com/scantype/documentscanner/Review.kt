@@ -121,17 +121,26 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
     val preview by produceState<Bitmap?>(null, page, flt, rot) {
+        // Dispose of the previous preview before creating a new native bitmap.
+        value?.let { old -> runCatching { old.recycle() } }
         value = null
         value = withContext(Dispatchers.Default) {
             runCatching { ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), flt) }.getOrNull()
         }
     }
     val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot) {
+        value.values.forEach { old -> runCatching { old.recycle() } }
+        value = emptyMap()
         value = withContext(Dispatchers.Default) {
             runCatching {
                 val base = ImageFilters.rotate(ImageFilters.load(ctx, page, 220), rot)
-                val m = PageFilter.values().associateWith { f -> ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f) }
-                base.recycle(); m
+                try {
+                    PageFilter.values().associateWith { f ->
+                        ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f)
+                    }
+                } finally {
+                    base.recycle()
+                }
             }.getOrDefault(emptyMap())
         }
     }
