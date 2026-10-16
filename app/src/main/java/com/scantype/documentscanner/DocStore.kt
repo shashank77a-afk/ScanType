@@ -162,6 +162,53 @@ class DocStore(private val ctx: Context) {
         return newFile("Typed").also { f -> f.outputStream().use { doc.writeTo(it) }; doc.close(); runCatching { sidecar(f).writeText(text) } }
     }
 
+    /**
+     * Rebuilds a PDF using the requested page order and per-page clockwise rotation.
+     * The original document is never modified. Entries are (source file, source page index, rotation degrees).
+     */
+    fun rebuildTransformed(pages: List<Triple<File, Int, Int>>, width: Int, prefix: String): File {
+        require(pages.isNotEmpty()) { "At least one page is required." }
+        val doc = PdfDocument()
+        val renderers = HashMap<File, PdfRenderer>()
+        try {
+            pages.forEachIndexed { outputIndex, (file, pageIndex, rotation) ->
+                val renderer = renderers.getOrPut(file) {
+                    PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY))
+                }
+                require(pageIndex in 0 until renderer.pageCount) { "A selected page no longer exists." }
+                renderer.openPage(pageIndex).use { source ->
+                    val renderWidth = width.coerceIn(600, 1800)
+                    val renderHeight = (renderWidth * source.height.toFloat() / source.width).toInt().coerceAtLeast(1)
+                    val rendered = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+                        .apply { eraseColor(Color.WHITE) }
+                    var rotated: Bitmap? = null
+                    try {
+                        source.render(rendered, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                        val normalized = ((rotation % 360) + 360) % 360
+                        val pageBitmap = if (normalized == 0) rendered else {
+                            Bitmap.createBitmap(rendered, 0, 0, rendered.width, rendered.height,
+                                Matrix().apply { postRotate(normalized.toFloat()) }, true).also { rotated = it }
+                        }
+                        val pageHeight = (595f * pageBitmap.height / pageBitmap.width).toInt().coerceAtLeast(1)
+                        val page = doc.startPage(PdfDocument.PageInfo.Builder(595, pageHeight, outputIndex + 1).create())
+                        page.canvas.drawColor(Color.WHITE)
+                        page.canvas.drawBitmap(pageBitmap, null, Rect(0, 0, 595, pageHeight), null)
+                        doc.finishPage(page)
+                    } finally {
+                        rotated?.takeIf { it !== rendered }?.recycle()
+                        rendered.recycle()
+                    }
+                }
+            }
+            val out = unique("${prefix}_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}")
+            out.outputStream().use { doc.writeTo(it) }
+            return out
+        } finally {
+            renderers.values.forEach { runCatching { it.close() } }
+            doc.close()
+        }
+    }
+
     /** Rebuilds a PDF from (file, pageIndex) pairs. Pages are re-rendered as images at [width] px. */
     fun rebuild(pages: List<Pair<File, Int>>, width: Int, prefix: String): File {
         val doc = PdfDocument()
