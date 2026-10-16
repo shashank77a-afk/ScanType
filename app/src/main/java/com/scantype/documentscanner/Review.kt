@@ -98,6 +98,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     if (r.pages.isEmpty()) { LaunchedEffect(Unit) { onBack() }; return }
     var idx by remember { mutableIntStateOf(0) }
     var applyAll by remember { mutableStateOf(true) }
+    var compareOriginal by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var gDialog by remember { mutableStateOf(false) }
@@ -120,12 +121,12 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickG = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us -> if (us.isNotEmpty()) addProcessed(us) }
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
-    val preview by produceState<Bitmap?>(null, page, flt, rot) {
+    val preview by produceState<Bitmap?>(null, page, flt, rot, compareOriginal) {
         // Dispose of the previous preview before creating a new native bitmap.
         value?.let { old -> runCatching { old.recycle() } }
         value = null
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), flt) }.getOrNull()
+            runCatching { ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt) }.getOrNull()
         }
     }
     val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot) {
@@ -242,6 +243,18 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 Text("Same filter for all pages", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
                 Switch(applyAll, { applyAll = it })
             }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { compareOriginal = !compareOriginal }) {
+                    Text(if (compareOriginal) "Showing Original · Return to Filter" else "Compare with Original",
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = {
+                    r.filters[cur] = PageFilter.ORIGINAL
+                    r.rots[cur] = 0
+                    compareOriginal = false
+                }) { Text("Reset", color = MaterialTheme.colorScheme.primary) }
+            }
             LazyRow(Modifier.padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(PageFilter.values().toList()) { f ->
@@ -269,7 +282,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 }
                 BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
                 BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
-                BarButton(Icons.Filled.Image, "Original") { r.pages[cur] = r.origs[cur]; r.rots[cur] = 0 }
+                BarButton(Icons.Filled.Image, "Original") { r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL; r.rots[cur] = 0; compareOriginal = false }
                 BarButton(Icons.Filled.TextFields, "Text") { onExtract() }
                 BarButton(Icons.Filled.Image, "Images") { gDialog = true }
             }
