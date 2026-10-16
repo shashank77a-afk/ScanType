@@ -148,39 +148,52 @@ fun PdfViewerScreen(
                     }
                 }
             } else {
-                Card(Modifier.fillMaxWidth().weight(1f), shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    PdfRenderedPage(file, page.coerceIn(0, count - 1), 1200,
-                        Modifier.fillMaxSize().padding(6.dp), ContentScale.Fit)
-                }
-                Spacer(Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 2.dp)) {
-                    items((0 until count).toList(), key = { it }) { index ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Card(
-                                onClick = { page = index },
-                                border = if (page == index) androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                Box(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.TopStart
+                ) {
+                    Column(
+                        Modifier.width(230.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().height(325.dp),
+                            shape = RoundedCornerShape(2.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                        ) {
+                            PdfRenderedPage(
+                                file,
+                                page.coerceIn(0, count - 1),
+                                900,
+                                Modifier.fillMaxSize().padding(2.dp),
+                                ContentScale.Fit
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            String.format(java.util.Locale.US, "%02d", page + 1),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        if (count > 1) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PdfRenderedPage(file, index, 140, Modifier.size(width = 64.dp, height = 84.dp).padding(3.dp))
+                                TextButton(onClick = { if (page > 0) page-- }, enabled = page > 0) {
+                                    Icon(Icons.Filled.ArrowBack, null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(4.dp)); Text("Previous")
+                                }
+                                Text("${page + 1} / $count", style = MaterialTheme.typography.labelLarge)
+                                TextButton(onClick = { if (page < count - 1) page++ }, enabled = page < count - 1) {
+                                    Text("Next"); Spacer(Modifier.width(4.dp))
+                                    Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
+                                }
                             }
-                            Text("${index + 1}", style = MaterialTheme.typography.labelSmall,
-                                color = if (page == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { if (page > 0) page-- }, enabled = page > 0) {
-                        Icon(Icons.Filled.ArrowBack, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("Previous")
-                    }
-                    Text("${page + 1} / $count", style = MaterialTheme.typography.labelLarge)
-                    OutlinedButton(onClick = { if (page < count - 1) page++ }, enabled = page < count - 1) {
-                        Text("Next"); Spacer(Modifier.width(4.dp)); Icon(Icons.Filled.ArrowForward, null, modifier = Modifier.size(18.dp))
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
                 Card(
                     onClick = onCheckErrors,
                     modifier = Modifier.fillMaxWidth(),
