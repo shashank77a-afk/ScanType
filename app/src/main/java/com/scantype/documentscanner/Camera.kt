@@ -158,6 +158,17 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     var autoTrigger by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
     val analysis = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
+    val onDoneLatest by rememberUpdatedState(onDone)
+    val onCloseLatest by rememberUpdatedState(onClose)
+    val onBatchLatest by rememberUpdatedState(onBatch)
+    var finishSent by remember { mutableStateOf(false) }
+
+    fun finishBatch() {
+        if (finishSent || busy || shots.isEmpty()) return
+        finishSent = true
+        val finished = shots.toList()
+        onDoneLatest(finished, CamMode.DOCS, batchFilter)
+    }
     val modeNow by rememberUpdatedState(mode)
     val autoNow by rememberUpdatedState(autoOn)
     val filterNow by rememberUpdatedState(liveFilter)
@@ -168,7 +179,12 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val hist = remember { arrayOfNulls<FloatArray>(1) }
 
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
-    LaunchedEffect(mode) { shots.clear(); quad = null; qr = null }
+    LaunchedEffect(mode) {
+        shots.clear()
+        finishSent = false
+        quad = null
+        qr = null
+    }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
         if (us.isNotEmpty()) onDone(us, mode, liveFilter)
     }
@@ -182,10 +198,16 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(r: ImageCapture.OutputFileResults) {
                     busy = false
+                    if (!f.exists() || f.length() <= 0L) {
+                        Toast.makeText(ctx, "The captured photo is empty. Please try again.", Toast.LENGTH_SHORT).show()
+                        return
+                    }
                     val u = Uri.fromFile(f)
-                    if (mode == CamMode.ID || mode == CamMode.BOOK) onDone(listOf(u), mode, filterNow)
-                    else if (batch && (mode == CamMode.DOCS)) { if (shots.isEmpty()) batchFilter = filterNow; shots.add(u) }
-                    else onDone(listOf(u), mode, filterNow)
+                    if (mode == CamMode.ID || mode == CamMode.BOOK) onDoneLatest(listOf(u), mode, filterNow)
+                    else if (batch && mode == CamMode.DOCS) {
+                        if (shots.isEmpty()) batchFilter = filterNow
+                        shots.add(u)
+                    } else onDoneLatest(listOf(u), mode, filterNow)
                 }
                 override fun onError(e: ImageCaptureException) {
                     busy = false
@@ -280,7 +302,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
         }
         Row(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp),
             horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClose) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
+            IconButton(onClick = { if (batch && mode == CamMode.DOCS && shots.isNotEmpty()) finishBatch() else onCloseLatest() }) { Icon(Icons.Filled.Close, "Close", tint = Color.White) }
             TextButton({ autoOn = !autoOn; prefs.autoCapture = autoOn }) { Text(if (autoOn) "Auto: ON" else "Auto: OFF", color = if (autoOn) Cyan else Color.White) }
             IconButton({ flash = !flash }) {
                 Icon(if (flash) Icons.Filled.FlashOn else Icons.Filled.FlashOff, "Flash", tint = Color.White)
@@ -294,8 +316,8 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
             else if (mode == CamMode.QR) Text("Point the camera at a QR code", color = Color.White, fontSize = 15.sp)
             else if (mode == CamMode.BOOK) Text("Place the open book flat. Both pages are split automatically.", color = Color.White, fontSize = 14.sp)
             else if (mode == CamMode.DOCS) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Single", !batch) { onBatch(false) }
-                Pill("Batch", batch) { onBatch(true) }
+                Pill("Single", !batch) { onBatchLatest(false) }
+                Pill("Batch", batch) { onBatchLatest(true) }
             }
             if (mode == CamMode.DOCS || mode == CamMode.BOOK) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -330,7 +352,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 else Box(Modifier.size(84.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
                     .clip(CircleShape).background(Color.White).clickable(enabled = !busy) { shoot() })
                 Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
-                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode, batchFilter) }) { Text("Done (${shots.size})") }
+                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button(onClick = { finishBatch() }, enabled = !busy && !finishSent) { Text("Done (${shots.size})") }
                 }
             }
         }
