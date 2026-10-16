@@ -436,6 +436,26 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
 
+    if (showFilterPanel) {
+        FilterEditPanel(
+            page = page,
+            rotation = rot,
+            selected = flt,
+            compareOriginal = compareOriginal,
+            applyAll = applyAll,
+            onCompare = { compareOriginal = !compareOriginal },
+            onSelect = { f -> if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f },
+            onCancel = {
+                filterPanelOriginals.forEach { (i, old) -> if (i in r.filters.indices) r.filters[i] = old }
+                filterPanelOriginals.keys.forEach { i -> if (r.canUndo(i)) r.undo(i) }
+                compareOriginal = false
+                showFilterPanel = false
+            },
+            onApply = { compareOriginal = false; showFilterPanel = false }
+        )
+        return
+    }
+
     Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
