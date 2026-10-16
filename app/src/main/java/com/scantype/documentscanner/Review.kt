@@ -525,6 +525,17 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL
                             r.rots[cur] = 0; compareOriginal = false
                         }
+                        BarButton(Icons.Filled.Edit, "Edit Text") {
+                            textDraft = r.textOverlays[cur]; showTextDialog = true
+                        }
+                        BarButton(Icons.Filled.Delete, "Smart Erase") {
+                            textDraft = ""
+                            r.pushUndo(cur)
+                            r.textOverlays[cur] = ""
+                            // Existing overlays can be removed non-destructively. Pixel-level
+                            // erasing of scanned source content needs a dedicated inpainting engine.
+                            scope.launch { snack.showSnackbar("Added text overlay cleared. Source scan remains unchanged.") }
+                        }
                     }
                     "Markup" -> {
                         BarButton(Icons.Filled.TextFields, "Edit Text") {
