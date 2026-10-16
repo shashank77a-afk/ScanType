@@ -42,7 +42,7 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
     val scope = rememberCoroutineScope()
     val bmp by produceState<Bitmap?>(null, uri, rot) {
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 2000), rot) }.getOrNull()
+            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1400), rot) }.getOrNull()
         }
     }
     DisposableEffect(bmp) {
@@ -111,9 +111,14 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
                             runCatching {
                                 val w = ImageFilters.warp(src, xy)
                                 val f = File(ctx.cacheDir, "crop_${System.currentTimeMillis()}.jpg")
-                                f.outputStream().use { w.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-                                w.recycle()
-                                Uri.fromFile(f)
+                                try {
+                                    f.outputStream().use { stream ->
+                                        check(w.compress(Bitmap.CompressFormat.JPEG, 90, stream)) { "Could not save cropped page" }
+                                    }
+                                    Uri.fromFile(f)
+                                } finally {
+                                    if (!w.isRecycled) w.recycle()
+                                }
                             }.getOrNull()
                         }
                         working = false
