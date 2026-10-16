@@ -232,6 +232,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var textDraft by remember { mutableStateOf("") }
     var watermarkDraft by remember { mutableStateOf("") }
     val liveSignatureDraft by rememberUpdatedState(signatureDraft)
+    val liveHighlightDraft by rememberUpdatedState(highlightDraft)
     val liveActiveHighlight by rememberUpdatedState(activeHighlight)
     var saving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
