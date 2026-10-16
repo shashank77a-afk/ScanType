@@ -112,6 +112,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
         restore(i, redoStacks[i].removeAt(redoStacks[i].lastIndex))
     }
     fun replace(i: Int, u: Uri, filter: PageFilter = filters[i]) { pushUndo(i); pages[i] = u; origs[i] = u; filters[i] = filter; rots[i] = 0 }
+    fun setCroppedPage(i: Int, u: Uri) { pushUndo(i); pages[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
         textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
@@ -511,7 +512,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
                         BarButton(Icons.Filled.RotateLeft, "Rotate") { r.pushUndo(cur); r.rots[cur] = (rot + 270) % 360 }
                         BarButton(Icons.Filled.Image, "Reset") {
-                            r.pushUndo(cur); r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL
+                            r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL
                             r.rots[cur] = 0; compareOriginal = false
                         }
                     }
