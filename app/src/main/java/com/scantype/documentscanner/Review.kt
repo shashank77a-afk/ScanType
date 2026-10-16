@@ -10,9 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -665,8 +667,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 }
             }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 when (editorTab) {
@@ -701,6 +703,14 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             activeHighlight = emptyList()
                             highlightDraft = r.erasures[cur]
                             showEraseDialog = true
+                        }
+                        BarButton(Icons.Filled.ArrowBack, "Undo") { r.undo(cur); compareOriginal = false }
+                        BarButton(Icons.Filled.ArrowForward, "Redo") { r.redo(cur); compareOriginal = false }
+                        BarButton(Icons.Filled.Image, "Reset") {
+                            r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL; r.rots[cur] = 0
+                            r.textOverlays[cur] = ""; r.watermarks[cur] = ""; r.signatures[cur] = emptyList()
+                            r.highlights[cur] = emptyList(); r.brushes[cur] = emptyList(); r.erasures[cur] = emptyList()
+                            compareOriginal = false
                         }
                     }
                     "Markup" -> {
