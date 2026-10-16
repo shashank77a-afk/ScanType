@@ -47,7 +47,7 @@ fun StudioScreen(start: StudioInit, store: DocStore, snack: SnackbarHostState, s
     var join by remember { mutableStateOf(true) }
     var gap by remember { mutableStateOf(1f) }
     var margin by remember { mutableIntStateOf(56) }
-    var name by remember { mutableStateOf("Document_" + stamp()) }
+    var name by remember { mutableStateOf("ScannerAi " + java.text.SimpleDateFormat("dd-MM-yyyy HH.mm", java.util.Locale.US).format(java.util.Date())) }
     var working by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { if (start.template == DocTemplate.LETTER && text.isBlank()) text = LETTER_SKELETON }
     val gate = rememberWriteGate { scope.launch { snack.showSnackbar("Storage permission is needed to save to Downloads on this Android version.") } }
@@ -164,7 +164,7 @@ fun StudioScreen(start: StudioInit, store: DocStore, snack: SnackbarHostState, s
                                         val ok = withContext(Dispatchers.IO) {
                                             runCatching { val f = tmp("pdf"); DocPdf.render(spec, f); Export.saveToDownloads(ctx, f, f.name, "application/pdf") }.getOrDefault(false)
                                         }
-                                        if (ok) "Saved to Downloads/ScanType" else fail
+                                        if (ok) "Saved to Downloads/ScannerAi" else fail
                                     }
                                 }
                             }, Modifier.weight(1f), enabled = !working) { Text("PDF to phone", fontSize = 13.sp) }
@@ -190,7 +190,7 @@ fun StudioScreen(start: StudioInit, store: DocStore, snack: SnackbarHostState, s
                                         val ok = withContext(Dispatchers.IO) {
                                             runCatching { val f = tmp("docx"); DocxWriter.write(spec, f); Export.saveToDownloads(ctx, f, f.name, Export.DOCX) }.getOrDefault(false)
                                         }
-                                        if (ok) "Word file saved to Downloads/ScanType" else fail
+                                        if (ok) "Word file saved to Downloads/ScannerAi" else fail
                                     }
                                 }
                             }, Modifier.weight(1f), enabled = !working) { Text("DOCX to phone", fontSize = 13.sp) }
