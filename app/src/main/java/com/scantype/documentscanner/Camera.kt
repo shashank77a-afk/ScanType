@@ -142,7 +142,7 @@ fun CameraScreen(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBat
 
 @Composable
 private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boolean, onBatch: (Boolean) -> Unit, prefs: Prefs,
-                          hint: String?, onDone: (List<Uri>, CamMode) -> Unit, onClose: () -> Unit) {
+                          hint: String?, onDone: (List<Uri>, CamMode, PageFilter) -> Unit, onClose: () -> Unit) {
     val ctx = LocalContext.current
     val owner = ctx as ComponentActivity
     val shots = remember { mutableStateListOf<Uri>() }
