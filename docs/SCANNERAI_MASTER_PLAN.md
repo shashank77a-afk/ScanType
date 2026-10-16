@@ -15,7 +15,7 @@
 - [x] Export finished scan PDFs to `Download/ScannerAi/` and Gallery images to `Pictures/ScannerAi/`.
 - [ ] Review Home, Files, Tools, and Me screens for visual consistency on multiple screen sizes.
 - [ ] Add robust collision handling and verify MediaStore/legacy storage behavior on Android 10+ and Android 9.
-- [ ] Implement a dedicated document preview/viewer with page thumbnails and Open/Edit/Share/Save actions.
+- [x] Implement an in-app PDF viewer with page navigation/thumbnails and Open/Edit/Share/Save actions (device validation remains in Phase 5).
 
 ## Phase 2 — Custom CameraX scanner
 - [x] Retain the in-app CameraX camera and existing edge-detection path.

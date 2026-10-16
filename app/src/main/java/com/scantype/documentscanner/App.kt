@@ -53,6 +53,7 @@ fun App(prefs: Prefs) {
     val store = remember { DocStore(ctx) }
     var tab by remember { mutableIntStateOf(0) }
     var docs by remember { mutableStateOf(store.list()) }
+    var viewingPdf by remember { mutableStateOf<File?>(null) }
     var editor by remember { mutableStateOf<String?>(null) }
     var editorIsHandwriting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
@@ -219,6 +220,13 @@ fun App(prefs: Prefs) {
         }
     }
 
+    val currentPdf = viewingPdf
+    if (currentPdf != null) {
+        BackHandler { viewingPdf = null }
+        PdfViewerScreen(currentPdf, store, onClose = { viewingPdf = null }, toast = ::toast)
+        return
+    }
+
     aiFail?.let { f ->
         AlertDialog({ aiFail = null }, title = { Text("AI recognition") }, text = { Text(f.message) },
             confirmButton = {
@@ -380,7 +388,7 @@ fun App(prefs: Prefs) {
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
                     { requestAi { openCam(CamMode.HAND) } }, { requestAi { openCam(CamMode.TEXT) } }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
                     { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 2 }, { openCam(CamMode.QR) },
-                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0)
+                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0, onOpenDocument = { viewingPdf = it })
                 2 -> ToolsScreen(sections)
                 else -> MeHub(onAccount = { showAccount = true }, onSettings = { showSettings = true })
             }
@@ -562,7 +570,8 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
                onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit, onAccount: () -> Unit,
                onScan: () -> Unit, onSmartPdf: () -> Unit, onTools: () -> Unit, onQr: () -> Unit,
-               onImportImages: () -> Unit, onImportFiles: () -> Unit, onIdCards: () -> Unit, showHome: Boolean) {
+               onImportImages: () -> Unit, onImportFiles: () -> Unit, onIdCards: () -> Unit, showHome: Boolean,
+               onOpenDocument: (File) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
     var cloudInfo by remember { mutableStateOf(false) }
@@ -643,7 +652,7 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
                 Text("Tap the camera button to scan your first document.", style = MaterialTheme.typography.bodySmall)
             }
         } else items(shown, key = { it.path }) { f ->
-            DocRow(f, store, refresh, toast, selecting, f in sel) { if (f in sel) sel.remove(f) else sel.add(f) }
+            DocRow(f, store, refresh, toast, selecting, f in sel, onOpenDocument) { if (f in sel) sel.remove(f) else sel.add(f) }
         }
     }
     if (newFolder) {
@@ -657,7 +666,7 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
 
 @Composable
 fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
-           selecting: Boolean, selected: Boolean, onToggle: () -> Unit) {
+           selecting: Boolean, selected: Boolean, onOpenDocument: (File) -> Unit, onToggle: () -> Unit) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
@@ -674,7 +683,7 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
         else Intent(action).setDataAndType(u, "application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         runCatching { ctx.startActivity(i) }.onFailure { toast("No app found to open this file.") }
     }
-    Card(onClick = { if (selecting) onToggle() else send(Intent.ACTION_VIEW) }, modifier = Modifier.fillMaxWidth(),
+    Card(onClick = { if (selecting) onToggle() else onOpenDocument(f) }, modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
@@ -696,8 +705,9 @@ fun DocRow(f: File, store: DocStore, refresh: () -> Unit, toast: (String) -> Uni
             else Box {
                 IconButton({ menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                 DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("Open") }, { menu = false; send(Intent.ACTION_VIEW) })
+                    DropdownMenuItem({ Text("Open") }, { menu = false; onOpenDocument(f) })
                     DropdownMenuItem({ Text("Rename") }, { menu = false; renaming = true })
+                    DropdownMenuItem({ Text("Open in another app") }, { menu = false; send(Intent.ACTION_VIEW) })
                     DropdownMenuItem({ Text("Share") }, { menu = false; send(Intent.ACTION_SEND) })
                     DropdownMenuItem({ Text("Print") }, { menu = false; Export.print(ctx, f, f.nameWithoutExtension) })
                     DropdownMenuItem({ Text("Save to Gallery") }, {

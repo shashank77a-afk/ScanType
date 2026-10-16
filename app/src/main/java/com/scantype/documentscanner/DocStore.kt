@@ -76,6 +76,25 @@ class DocStore(private val ctx: Context) {
         PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { it.pageCount }
     }.getOrDefault(0)
 
+    /** Render one PDF page to a bounded bitmap for the in-app viewer or its thumbnails. */
+    fun renderPage(f: File, pageIndex: Int, targetWidth: Int): Bitmap? = runCatching {
+        PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+            if (pageIndex !in 0 until renderer.pageCount) return@use null
+            renderer.openPage(pageIndex).use { page ->
+                val width = targetWidth.coerceIn(96, 1800)
+                val height = (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1)
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+                try {
+                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    bitmap
+                } catch (e: Exception) {
+                    bitmap.recycle()
+                    throw e
+                }
+            }
+        }
+    }.getOrNull()
+
     fun thumb(f: File): Bitmap? = runCatching {
         PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { r ->
             r.openPage(0).use { p ->
