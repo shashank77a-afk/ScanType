@@ -77,6 +77,45 @@ class DocStore(private val ctx: Context) {
         PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { it.pageCount }
     }.getOrDefault(0)
 
+    /**
+     * Renders an existing PDF into temporary page images so the same scanner editor
+     * can edit it. The source PDF is never modified; callers should delete these
+     * cache images when the edit session is saved or cancelled.
+     */
+    fun renderPdfPagesForEditing(file: File): List<Uri> {
+        val sessionDir = File(ctx.cacheDir, "pdf_edit_${System.currentTimeMillis()}").apply { mkdirs() }
+        val result = ArrayList<Uri>()
+        try {
+            PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
+                for (index in 0 until renderer.pageCount) {
+                    renderer.openPage(index).use { page ->
+                        val width = 1800
+                        val height = (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1)
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        try {
+                            bitmap.eraseColor(Color.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            val output = File(sessionDir, "page_${(index + 1).toString().padStart(4, '0')}.jpg")
+                            output.outputStream().use { stream ->
+                                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 94, stream)) {
+                                    error("Could not prepare PDF page ${index + 1} for editing")
+                                }
+                            }
+                            result.add(Uri.fromFile(output))
+                        } finally {
+                            if (!bitmap.isRecycled) bitmap.recycle()
+                        }
+                    }
+                }
+            }
+            if (result.isEmpty()) error("This PDF has no editable pages")
+            return result
+        } catch (e: Exception) {
+            sessionDir.deleteRecursively()
+            throw e
+        }
+    }
+
     fun thumb(f: File): Bitmap? = runCatching {
         PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { r ->
             r.openPage(0).use { p ->
