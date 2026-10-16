@@ -410,11 +410,13 @@ fun App(prefs: Prefs) {
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                0 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
+                0, 1 -> DocsScreen(docs, store, ::refresh, ::toast, selecting, sel,
                     { selecting = it; if (!it) sel.clear() }, { showSettings = true },
                     { requestAi { openCam(CamMode.HAND) } }, { requestAi { openCam(CamMode.TEXT) } }, { studio = StudioInit("", DocTemplate.PLAIN) }, { showAccount = true },
-                    { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 1 }, { openCam(CamMode.QR) })
-                else -> ToolsScreen(sections)
+                    { openCam(CamMode.DOCS) }, { requestAi { letter = LetterState() } }, { tab = 2 }, { openCam(CamMode.QR) },
+                    { pickImages.launch(imageOnly) }, { importPdf.launch(arrayOf("application/pdf")) }, { idState = IdState() }, showHome = tab == 0)
+                2 -> ToolsScreen(sections)
+                else -> MeHub(onAccount = { showAccount = true }, onSettings = { showSettings = true })
             }
             if (aiHint) AlertDialog({ aiHint = false }, title = { Text("Better Hindi handwriting?") },
                 text = { Text("Offline recognition is weak on handwriting. Turn on AI recognition in Settings (needs a free Gemini API key) for much better results.") },
@@ -449,15 +451,70 @@ fun App(prefs: Prefs) {
 @Composable
 fun MainBar(tab: Int, onTab: (Int) -> Unit, onScan: () -> Unit) {
     Box(Modifier.fillMaxWidth()) {
-        NavigationBar(Modifier.padding(top = 28.dp)) {
-            NavigationBarItem(tab == 0, { onTab(0) }, { Icon(Icons.Filled.Description, null) }, label = { Text("Docs") })
-            NavigationBarItem(false, {}, {}, enabled = false)
-            NavigationBarItem(tab == 1, { onTab(1) }, { Icon(Icons.Filled.Apps, null) }, label = { Text("Tools") })
+        NavigationBar(Modifier.padding(top = 24.dp)) {
+            NavigationBarItem(tab == 0, { onTab(0) }, { Icon(Icons.Filled.Home, null) }, label = { Text("Home") })
+            NavigationBarItem(tab == 1, { onTab(1) }, { Icon(Icons.Filled.FolderOpen, null) }, label = { Text("Files") })
+            NavigationBarItem(false, {}, { Icon(Icons.Filled.CameraAlt, null) }, enabled = false, label = { Text("") })
+            NavigationBarItem(tab == 2, { onTab(2) }, { Icon(Icons.Filled.Apps, null) }, label = { Text("Tools") })
+            NavigationBarItem(tab == 3, { onTab(3) }, { Icon(Icons.Filled.Person, null) }, label = { Text("Me") })
         }
-        FloatingActionButton(onScan, Modifier.align(Alignment.TopCenter).size(64.dp), shape = CircleShape,
+        FloatingActionButton(onScan, Modifier.align(Alignment.TopCenter).size(58.dp), shape = CircleShape,
             containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary) {
-            Icon(Icons.Filled.CameraAlt, "Scan", Modifier.size(30.dp))
+            Icon(Icons.Filled.CameraAlt, "Scan", Modifier.size(28.dp))
         }
+    }
+}
+
+@Composable
+fun MeHub(onAccount: () -> Unit, onSettings: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Me", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+        item {
+            Card(onClick = onAccount, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.AccountCircle, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("Account", style = MaterialTheme.typography.titleMedium)
+                        Text("Google sign-in for AI features", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        item {
+            Card(onClick = onSettings, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Settings, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("Settings", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+        item {
+            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text("Google Drive Backup", style = MaterialTheme.typography.titleMedium)
+                        Text("Coming later — backup is not active yet.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+        item { Text("Scanner.ai", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary) }
+    }
+}
+
+@Composable
+private fun HomeShortcut(label: String, icon: ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(modifier.clickable(onClick = onClick).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Box(Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, label, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(25.dp))
+        }
+        Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -538,9 +595,11 @@ fun ToolTile(t: ToolItem, modifier: Modifier) {
 fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (String) -> Unit,
                selecting: Boolean, sel: SnapshotStateList<File>, onSelecting: (Boolean) -> Unit,
                onSettings: () -> Unit, onHand: () -> Unit, onText: () -> Unit, onPdf: () -> Unit, onAccount: () -> Unit,
-               onScan: () -> Unit, onSmartPdf: () -> Unit, onTools: () -> Unit, onQr: () -> Unit) {
+               onScan: () -> Unit, onSmartPdf: () -> Unit, onTools: () -> Unit, onQr: () -> Unit,
+               onImportImages: () -> Unit, onImportFiles: () -> Unit, onIdCards: () -> Unit, showHome: Boolean) {
     var q by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var cloudInfo by remember { mutableStateOf(false) }
     var folder by remember { mutableStateOf<String?>(null) }
     var folderMenu by remember { mutableStateOf(false) }
     var newFolder by remember { mutableStateOf(false) }
@@ -555,70 +614,41 @@ fun DocsScreen(docs: List<File>, store: DocStore, refresh: () -> Unit, toast: (S
         contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.scantype_logo), "Scanner.ai logo", Modifier.size(48.dp).clip(RoundedCornerShape(15.dp)))
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Scanner.ai", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onBackground)
-                    Text("Scan smarter. Create more.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                IconButton({ searching = !searching; if (!searching) q = "" }) { Icon(Icons.Filled.Search, "Search") }
-                IconButton(onAccount) { Icon(Icons.Filled.AccountCircle, "Account") }
-                IconButton(onSettings) { Icon(Icons.Filled.Settings, "Settings") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(q, { q = it; searching = true }, Modifier.weight(1f),
+                    placeholder = { Text("Search") }, singleLine = true, shape = RoundedCornerShape(12.dp),
+                    leadingIcon = { Icon(Icons.Filled.Search, "Search") },
+                    trailingIcon = if (q.isNotEmpty()) ({ IconButton({ q = "" }) { Icon(Icons.Filled.Close, "Clear") } }) else null)
+                IconButton({ cloudInfo = true }) { Icon(Icons.Filled.Cloud, "Cloud backup coming later", tint = MaterialTheme.colorScheme.primary) }
             }
         }
-        if (searching) item {
-            OutlinedTextField(q, { q = it }, Modifier.fillMaxWidth(), placeholder = { Text("Search documents or text") }, singleLine = true, shape = RoundedCornerShape(16.dp))
-        }
-        if (!selecting) item {
-            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(26.dp)).background(Brush.linearGradient(listOf(Color(0xFFDCF4FF), Color(0xFFEDE6FF), Color(0xFFD9FBF0)))).padding(18.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Your documents, upgraded with AI", color = Color(0xFF17233F), fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Hindi & English handwriting to editable text, with smarter PDF tools.", color = Color(0xFF38445C), fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onHand, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D6CE8), contentColor = Color.White)) {
-                            Icon(Icons.Filled.Edit, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Handwriting", fontSize = 12.sp)
-                        }
-                        OutlinedButton(onPdf, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) {
-                            Icon(Icons.Filled.Description, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Text → PDF", fontSize = 12.sp)
-                        }
-                    }
+        if (showHome && !selecting) item {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HomeShortcut("Smart Scan", Icons.Filled.DocumentScanner, Modifier.weight(1f)) { onScan() }
+                    HomeShortcut("PDF Tools", Icons.Filled.PictureAsPdf, Modifier.weight(1f)) { onTools() }
+                    HomeShortcut("Import Images", Icons.Filled.Image, Modifier.weight(1f)) { onImportImages() }
+                    HomeShortcut("Import Files", Icons.Filled.FolderOpen, Modifier.weight(1f)) { onImportFiles() }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HomeShortcut("ID Cards", Icons.Filled.CreditCard, Modifier.weight(1f)) { onIdCards() }
+                    HomeShortcut("Extract Text", Icons.Filled.TextFields, Modifier.weight(1f)) { onHand() }
+                    HomeShortcut("AI Tools", Icons.Filled.AutoAwesome, Modifier.weight(1f)) { onSmartPdf() }
+                    HomeShortcut("All", Icons.Filled.Apps, Modifier.weight(1f)) { onTools() }
                 }
             }
         }
-        if (!selecting) item { DashboardSectionTitle("AI Tools", "Recognize, review and recreate documents") }
-        if (!selecting) item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("Handwriting to Text", "हस्तलिखित को AI से editable text में बदलें", Icons.Filled.Psychology, Color(0xFFE8F2FF), Color(0xFF3169D8), Modifier.weight(1f), onHand)
-                DashboardToolCard("Same-Layout Typed PDF", "AI से layout बचाकर typed PDF बनाएँ", Icons.Filled.PictureAsPdf, Color(0xFFDEF8F1), Color(0xFF138D82), Modifier.weight(1f), onSmartPdf)
-            }
-        }
-        if (!selecting) item { DashboardSectionTitle("Non-AI Tools", "Essential document tools that work locally") }
-        if (!selecting) item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("Document Scan", "स्कैन और crop करें", Icons.Filled.DocumentScanner, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onScan, outlined = true)
-                DashboardToolCard("PDF Tools", "Merge, split, compress", Icons.Filled.Layers, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onTools, outlined = true)
-            }
-        }
-        if (!selecting) item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                DashboardToolCard("QR Scanner", "QR और barcode scan", Icons.Filled.QrCodeScanner, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), onQr, outlined = true)
-                DashboardToolCard("My Documents", "सेव किए दस्तावेज़", Icons.Filled.FolderOpen, MaterialTheme.colorScheme.surface, Color(0xFF1596A7), Modifier.weight(1f), {
-                    searching = false; q = ""; folder = null
-                    homeScope.launch { homeListState.animateScrollToItem(10) }
-                }, outlined = true)
-            }
-        }
-        if (!selecting) item {
-            Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Lightbulb, null, tint = MaterialTheme.colorScheme.primary)
+        if (!selecting) item { DashboardSectionTitle(if (showHome) "Recents" else "All Documents", if (showHome) "Your recent scans and PDFs" else "All saved documents") }
+        if (cloudInfo) item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Cloud, null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))
-                    Text("AI recognition needs AI enabled in Settings. Scanning and PDF tools remain available locally.", style = MaterialTheme.typography.bodySmall)
+                    Text("Cloud icon is reserved for future Google Drive backup. Backup is not active yet.", modifier = Modifier.weight(1f))
+                    TextButton({ cloudInfo = false }) { Text("OK") }
                 }
             }
         }
-        if (!selecting) item { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { ScanTypeBannerAd() } }
         item {
             if (selecting) Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton({ onSelecting(false) }) { Icon(Icons.Filled.Close, "Cancel") }
