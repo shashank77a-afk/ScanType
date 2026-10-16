@@ -61,7 +61,8 @@ private data class PageEditSnapshot(
     val watermark: String,
     val signature: List<List<Pair<Float, Float>>>,
     val highlights: List<List<Pair<Float, Float>>>,
-    val brushes: List<List<Pair<Float, Float>>>
+    val brushes: List<List<Pair<Float, Float>>>,
+    val erasures: List<List<Pair<Float, Float>>>
 )
 
 class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENHANCE) {
@@ -74,24 +75,25 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     val signatures = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val brushes = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    val erasures = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     private val undoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     private val redoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>, initialFilter: PageFilter = filters.lastOrNull() ?: PageFilter.ENHANCE) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(initialFilter); rots.add(0)
-            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList())
+            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList()); erasures.add(emptyList())
             undoStacks.add(mutableListOf()); redoStacks.add(mutableListOf())
         }
     }
     private fun current(i: Int) = PageEditSnapshot(
         pages[i], origs[i], filters[i], rots[i], textOverlays[i], watermarks[i],
-        signatures[i].map { it.toList() }, highlights[i].map { it.toList() }, brushes[i].map { it.toList() }
+        signatures[i].map { it.toList() }, highlights[i].map { it.toList() }, brushes[i].map { it.toList() }, erasures[i].map { it.toList() }
     )
     private fun restore(i: Int, p: PageEditSnapshot) {
         pages[i] = p.page; origs[i] = p.original; filters[i] = p.filter; rots[i] = p.rotation
         textOverlays[i] = p.text; watermarks[i] = p.watermark; signatures[i] = p.signature
-        highlights[i] = p.highlights; brushes[i] = p.brushes
+        highlights[i] = p.highlights; brushes[i] = p.brushes; erasures[i] = p.erasures
     }
     fun pushUndo(i: Int) {
         if (i !in pages.indices) return
@@ -115,7 +117,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     fun setCroppedPage(i: Int, u: Uri) { pushUndo(i); pages[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
-        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i); erasures.removeAt(i)
         undoStacks.removeAt(i); redoStacks.removeAt(i)
     }
     fun move(i: Int, d: Int) {
@@ -130,6 +132,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
         val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
         val hi = highlights[i]; highlights[i] = highlights[j]; highlights[j] = hi
         val br = brushes[i]; brushes[i] = brushes[j]; brushes[j] = br
+        val er = erasures[i]; erasures[i] = erasures[j]; erasures[j] = er
         val un = undoStacks[i]; undoStacks[i] = undoStacks[j]; undoStacks[j] = un
         val re = redoStacks[i]; redoStacks[i] = redoStacks[j]; redoStacks[j] = re
     }
