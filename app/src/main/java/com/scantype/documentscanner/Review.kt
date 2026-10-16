@@ -284,6 +284,105 @@ private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onCl
     }
 }
 
+
+@Composable
+private fun FilterEditPanel(
+    page: Uri,
+    rotation: Int,
+    selected: PageFilter,
+    compareOriginal: Boolean,
+    applyAll: Boolean,
+    onCompare: () -> Unit,
+    onSelect: (PageFilter) -> Unit,
+    onCancel: () -> Unit,
+    onApply: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val previewState by produceState<Result<Bitmap>?>(null, page, rotation, selected, compareOriginal) {
+        value = null
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                ImageFilters.apply(
+                    ImageFilters.rotate(ImageFilters.load(ctx, page, 1000), rotation),
+                    if (compareOriginal) PageFilter.ORIGINAL else selected
+                )
+            }
+        }
+    }
+    val preview = previewState?.getOrNull()
+    val thumbnails by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rotation) {
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                PageFilter.values().associateWith { filter ->
+                    ImageFilters.apply(
+                        ImageFilters.rotate(ImageFilters.load(ctx, page, 140), rotation),
+                        filter
+                    )
+                }
+            }.getOrDefault(emptyMap())
+        }
+    }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Cancel filter") }
+                Text("Filter", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                TextButton(onCompare) { Text(if (compareOriginal) "Show Filter" else "Compare") }
+                IconButton(onApply) { Icon(Icons.Filled.Add, "Apply filter", tint = MaterialTheme.colorScheme.primary) }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                when {
+                    preview != null -> Image(preview.asImageBitmap(), "Filtered document preview", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    previewState == null -> CircularProgressIndicator()
+                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Preview failed to load.")
+                        TextButton(onClick = onCancel) { Text("Close") }
+                    }
+                }
+                TextButton(onClick = onCompare, Modifier.align(Alignment.BottomEnd)) { Text("Compare") }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Same filter for all pages", Modifier.weight(1f), color = MaterialTheme.colorScheme.onBackground)
+                Switch(checked = applyAll, onCheckedChange = { /* parent setting stays consistent with main editor */ })
+            }
+            LazyRow(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(PageFilter.values().toList()) { filter ->
+                    val active = filter == selected
+                    Column(
+                        Modifier.width(84.dp).clickable { onSelect(filter) },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier.size(80.dp, 100.dp).clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .then(if (active) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)
+                        ) {
+                            thumbnails[filter]?.let {
+                                Image(it.asImageBitmap(), filter.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                        }
+                        Text(filter.label, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onCancel, Modifier.weight(1f)) { Text("Cancel") }
+                Spacer(Modifier.width(12.dp))
+                Button(onApply, Modifier.weight(1f)) { Text("Apply") }
+            }
+        }
+    }
+}
+
 @Composable
 fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                      onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAddCamera: () -> Unit,
