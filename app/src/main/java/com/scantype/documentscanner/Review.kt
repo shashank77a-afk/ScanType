@@ -308,8 +308,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
     val preview by produceState<Bitmap?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
-        // Dispose of the previous preview before creating a new native bitmap.
-        value?.let { old -> runCatching { old.recycle() } }
+        // Clear the state first; DisposableEffect releases the prior image after Compose stops drawing it.
         value = null
         value = withContext(Dispatchers.Default) {
             runCatching {
@@ -325,7 +324,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
     val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
-        value.values.forEach { old -> runCatching { old.recycle() } }
         value = emptyMap()
         value = withContext(Dispatchers.Default) {
             runCatching {
@@ -347,6 +345,12 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         value = withContext(Dispatchers.Default) {
             runCatching { val b = ImageFilters.load(ctx, page, 500); val m = EdgeDetect.quality(b); b.recycle(); m }.getOrNull()
         }
+    }
+    DisposableEffect(preview) {
+        onDispose { preview?.let { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
+    }
+    DisposableEffect(thumbs) {
+        onDispose { thumbs.values.forEach { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
     }
 
     fun finish() {
