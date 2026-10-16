@@ -113,6 +113,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     var quad by remember { mutableStateOf<FloatArray?>(null) }
     var frameAr by remember { mutableFloatStateOf(0.75f) }
     var qr by remember { mutableStateOf<String?>(null) }
+    var liveHint by remember { mutableStateOf<String?>(null) }
     var autoTrigger by remember { mutableStateOf(false) }
     val capture = remember { ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY).build() }
     val analysis = remember { ImageAnalysis.Builder().setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST).build() }
@@ -121,6 +122,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val busyNow by rememberUpdatedState(busy)
     val stable = remember { IntArray(1) }
     val cooldown = remember { LongArray(1) }
+    val hintTick = remember { LongArray(1) }
     val hist = remember { arrayOfNulls<FloatArray>(1) }
 
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
@@ -173,9 +175,24 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     val step = max(1, max(w, h) / 240)
                     val sw = w / step; val sh = h / step
                     val g = IntArray(sw * sh)
+                    var brightnessTotal = 0L
                     for (y in 0 until sh) {
                         val row = y * step * rs
-                        for (x in 0 until sw) g[y * sw + x] = buf.get(row + x * step).toInt() and 0xFF
+                        for (x in 0 until sw) {
+                            val v = buf.get(row + x * step).toInt() and 0xFF
+                            g[y * sw + x] = v
+                            brightnessTotal += v
+                        }
+                    }
+                    // Update the warning occasionally, not on every camera frame, to avoid UI churn.
+                    if (now - hintTick[0] > 1800L) {
+                        hintTick[0] = now
+                        val meanBrightness = brightnessTotal.toDouble() / g.size
+                        liveHint = when {
+                            meanBrightness < 48 -> "Low light — turn on a light or use flash."
+                            meanBrightness > 244 -> "Too much glare — tilt the page or reduce the light."
+                            else -> null
+                        }
                     }
                     val (rg, rw, rh) = EdgeDetect.rotate(g, sw, sh, proxy.imageInfo.rotationDegrees)
                     frameAr = rw.toFloat() / rh
@@ -229,6 +246,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xAA000000))
             .navigationBarsPadding().padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            liveHint?.let { Text(it, color = Color(0xFFFFD180), fontSize = 13.sp, fontWeight = FontWeight.Medium) }
             if (mode == CamMode.ID && hint != null) Text(hint, color = Color.White, fontSize = 15.sp)
             else if (mode == CamMode.QR) Text("Point the camera at a QR code", color = Color.White, fontSize = 15.sp)
             else if (mode == CamMode.BOOK) Text("Place the open book flat. Both pages are split automatically.", color = Color.White, fontSize = 14.sp)
