@@ -316,8 +316,13 @@ fun App(prefs: Prefs) {
                 toast("Document renamed.")
             },
             onCheckErrors = {
-                val uri = store.uri(vf)
-                runOcr(listOf(uri), false)
+                scope.launch {
+                    busy = "Preparing document pages for error check…"
+                    val pages = withContext(Dispatchers.IO) { runCatching { store.renderPdfPagesForEditing(vf) } }
+                    busy = null
+                    pages.onSuccess { runOcr(it, false) }
+                        .onFailure { toast("Could not prepare this PDF for checking.") }
+                }
             }
         )
         return
