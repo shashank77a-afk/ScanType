@@ -21,21 +21,20 @@
 - [x] Retain the in-app CameraX camera and existing edge-detection path.
 - [x] Keep Auto Capture on/off and manual shutter controls.
 - [x] Remove the Google ML Kit Document Scanner dependency/fallback entry point.
-- [ ] Add lightweight live Enhance/B&W/Lighten preview without slowing camera frames.
-- [x] Add throttled in-camera low-light and glare guidance; validate on-device in different lighting.
-- [x] Add throttled live low-light/glare hints; existing Review quality warning catches blur and existing CropScreen provides draggable four-corner perspective correction (real-device tuning remains).
+- [x] Add live filter selection and lightweight color-matrix preview on Android 12+; on older Android versions the selected filter is applied after capture (device responsiveness/quality checks remain).
+- [x] Add throttled in-camera low-light/glare hints; Review quality warning catches blur and CropScreen provides draggable four-corner perspective correction (real-device tuning remains).
 - [ ] Improve edge stability and verify the retake/manual-corner workflow under difficult lighting.
+- [x] Keep the selected filter consistent through multi-page camera capture into review.
 - [ ] Test multi-page Add Page/Finish Document, page reorder/delete/rotate and ID front/back end-to-end.
-- [ ] Add Book Mode quality improvements and verify curved-page handling.
+- [ ] Improve Book Mode quality and verify curved-page handling.
 
 ## Phase 3 — Filter engine and editor
 - [x] Add filter choices: Original, Enhance, Lighten, B&W, No Shadow, OmniFix.
 - [x] Improve local illumination normalization and B&W thresholding; keep OmniFix as a separate processing path.
-- [x] Add Original comparison toggle and filter Reset action; Original shortcut resets the filter and rotation.
-- [x] Release replaced preview and thumbnail bitmaps when pages/filters change to reduce native-memory pressure.
+- [x] Add Original comparison toggle and filter Reset action; resetting a filter preserves the manual crop.
+- [x] Release replaced preview and thumbnail bitmaps after Compose stops drawing them.
 - [ ] Visually validate distinct results for all six filters on real photographs; OmniFix must be clearly useful, not merely different in code.
-- [x] Add an Original comparison toggle and Reset action; page previews are regenerated from the source URI rather than repeatedly filtering a prior result.
-- [ ] Add undo/redo history.
+- [x] Add per-page Undo/Redo for filter, rotation, crop and markup changes.
 - [x] Add editor tabs: Images, Markup, Page.
 - [x] Implement Crop, Rotate, signature drawing, Add Text, Brush/Highlight, Watermark and page add/delete/reorder controls; these still need real-device workflow testing.
 - [ ] Treat Smart Erase as later/experimental until it can avoid deleting real document content.
@@ -58,4 +57,4 @@
 - [ ] Only mark Phase 5 complete after device testing; CI success alone is not device verification.
 
 ## Current implementation notes
-This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, bitmap cleanup, live lighting/glare hints, Images/Markup/Page tabs, and page-aware text/signature/brush/highlight/watermark overlays have been added. Live filtered camera rendering, undo/redo, broader edge tuning, several advanced PDF actions, on-device annotation/filter QA, and full regression testing remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
+This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, lifecycle-safe bitmap cleanup, Android 12+ live filtered camera preview, camera light/glare hints, consistent multi-page filter selection, per-page Undo/Redo, Images/Markup/Page tabs, and page-aware text/signature/brush/highlight/watermark overlays have been added. Real-device filter/annotation QA, older-device camera behavior, broader edge tuning, several advanced PDF actions, and full regression testing remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
