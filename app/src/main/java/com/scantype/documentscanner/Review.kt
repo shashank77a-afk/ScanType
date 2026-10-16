@@ -253,9 +253,6 @@ private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onCl
     val bmp by produceState<Bitmap?>(null, uri, rot) {
         value = withContext(Dispatchers.Default) { runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 160), rot) }.getOrNull() }
     }
-    DisposableEffect(bmp) {
-        onDispose { bmp?.let { image -> if (!image.isRecycled) runCatching { image.recycle() } } }
-    }
     Box(Modifier.size(52.dp, 68.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant)
         .then(if (selected) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)) else Modifier).clickable { onClick() }) {
         bmp?.let { Image(it.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -348,12 +345,6 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         value = withContext(Dispatchers.Default) {
             runCatching { val b = ImageFilters.load(ctx, page, 500); val m = EdgeDetect.quality(b); b.recycle(); m }.getOrNull()
         }
-    }
-    DisposableEffect(preview) {
-        onDispose { preview?.let { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
-    }
-    DisposableEffect(thumbs) {
-        onDispose { thumbs.values.forEach { bmp -> if (!bmp.isRecycled) runCatching { bmp.recycle() } } }
     }
 
     fun finish() {
