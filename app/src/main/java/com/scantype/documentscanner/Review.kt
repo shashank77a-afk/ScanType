@@ -774,11 +774,12 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Draw over content to cover it with white. This works offline; it hides marks rather than reconstructing the background.")
-                androidx.compose.foundation.Canvas(
-                    Modifier.fillMaxWidth().height(220.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.White)
-                        .pointerInput(Unit) {
+                Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(8.dp))) {
+                    preview?.let {
+                        Image(it.asImageBitmap(), "Document to erase", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    } ?: Box(Modifier.fillMaxSize().background(Color.White))
+                    androidx.compose.foundation.Canvas(
+                        Modifier.fillMaxSize().pointerInput(Unit) {
                             detectDragGestures(
                                 onDragStart = { p ->
                                     activeHighlight = listOf(
@@ -799,15 +800,17 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                                 }
                             )
                         }
-                ) {
-                    (highlightDraft + listOf(activeHighlight)).forEach { stroke ->
-                        if (stroke.size > 1) {
-                            val path = androidx.compose.ui.graphics.Path()
-                            stroke.forEachIndexed { i, p ->
-                                val x = p.first * size.width; val y = p.second * size.height
-                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    ) {
+                        (highlightDraft + listOf(activeHighlight)).forEach { stroke ->
+                            if (stroke.size > 1) {
+                                val path = androidx.compose.ui.graphics.Path()
+                                stroke.forEachIndexed { i, p ->
+                                    val x = p.first * size.width; val y = p.second * size.height
+                                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                }
+                                drawPath(path, Color(0xAAFFFFFF), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 30.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                                drawPath(path, Color(0xFF808080), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                             }
-                            drawPath(path, Color.White, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 24.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
                         }
                     }
                 }
