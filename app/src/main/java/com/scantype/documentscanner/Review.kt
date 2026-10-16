@@ -510,6 +510,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 when (editorTab) {
                     "Images" -> {
                         BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
+                        BarButton(Icons.Filled.Image, "CS PDF") { fMode = 0; fDialog = true }
                         Box {
                             BarButton(Icons.Filled.Add, "Add") { addMenu = true }
                             DropdownMenu(addMenu, { addMenu = false }) {
@@ -526,7 +527,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         }
                     }
                     "Markup" -> {
-                        BarButton(Icons.Filled.TextFields, "Add Text") {
+                        BarButton(Icons.Filled.TextFields, "Edit Text") {
                             textDraft = r.textOverlays[cur]; showTextDialog = true
                         }
                         BarButton(Icons.Filled.Edit, "Signature") {
