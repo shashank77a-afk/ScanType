@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
@@ -83,15 +84,15 @@ fun PdfToolsScreen(initial: Tool, docs: List<File>, store: DocStore, close: () -
                     val f = selectedFiles[0]
                     when (selectedTool) {
                         Tool.MERGE -> {
-                            store.rebuild(picked.flatMap { p -> (0 until store.pageCount(p)).map { p to it } }, 1400, "Merged")
+                            store.rebuild(selectedFiles.flatMap { p -> (0 until store.pageCount(p)).map { p to it } }, 1400, "Merged")
                             "Merged PDF saved"
                         }
                         Tool.EXTRACT, Tool.DELETE -> {
                             val n = store.pageCount(f)
                             val sel = parseRange(selectedRange, n) ?: return@runCatching "Please enter pages like 1-3,5 (this PDF has $n)."
-                            val keep = if (tool == Tool.EXTRACT) sel else (0 until n).filter { it !in sel }
+                            val keep = if (selectedTool == Tool.EXTRACT) sel else (0 until n).filter { it !in sel }
                             if (keep.isEmpty()) return@runCatching "That would leave no pages."
-                            store.rebuild(keep.map { f to it }, 1400, if (tool == Tool.EXTRACT) "Split" else "Edited")
+                            store.rebuild(keep.map { f to it }, 1400, if (selectedTool == Tool.EXTRACT) "Split" else "Edited")
                             "New PDF saved"
                         }
                         Tool.COMPRESS -> {
