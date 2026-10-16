@@ -1,13 +1,11 @@
 package com.scantype.documentscanner
 
-import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -37,17 +35,12 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
-import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
-
-enum class Mode { SCAN, HANDWRITING }
 
 class ToolItem(val icon: ImageVector, val label: String, val tint: Color, val onClick: () -> Unit)
 
@@ -134,32 +127,6 @@ fun App(prefs: Prefs) {
                 else if (Regex("\\[\\?\\]").findAll(out).count() >= 3) toast("Some words are unclear and marked [?]. Review them, or rescan in better light.")
             }
         }
-    }
-
-    val scanLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
-        val res = if (r.resultCode == Activity.RESULT_OK) GmsDocumentScanningResult.fromActivityResultIntent(r.data) else null
-        if (res != null) scope.launch {
-            val pdf = res.pdf?.uri
-            val pgs = res.pages?.map { it.imageUri } ?: emptyList()
-            if (mode == Mode.SCAN) {
-                if (pgs.isNotEmpty()) { val rv = review; if (rv != null) rv.add(pgs) else review = ReviewState(pgs) }
-            } else {
-                if (pdf != null) withContext(Dispatchers.IO) { runCatching { store.importPdf(pdf, "Handwriting_" + stamp()) } }
-                refresh()
-                runOcr(pgs, true)
-            }
-        }
-    }
-
-    fun startScan(m: Mode) {
-        mode = m
-        val opts = GmsDocumentScannerOptions.Builder()
-            .setGalleryImportAllowed(true).setPageLimit(if (batch) 30 else 1)
-            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG, GmsDocumentScannerOptions.RESULT_FORMAT_PDF)
-            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL).build()
-        GmsDocumentScanning.getClient(opts).getStartScanIntent(activity)
-            .addOnSuccessListener { scanLauncher.launch(IntentSenderRequest.Builder(it).build()) }
-            .addOnFailureListener { toast("The scanner isn't available. Please update Google Play services and try again.") }
     }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
@@ -306,7 +273,7 @@ fun App(prefs: Prefs) {
             if (cm == CamMode.ID) (if (idSide == 0) "ID Card: scan the FRONT side" else "ID Card: scan the BACK side") else null,
             { uris, m -> onCaptured(uris, m) },
             { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null },
-            { camMode = null; startScan(Mode.SCAN) })
+            })
         return
     }
     val ids = idState
@@ -386,7 +353,7 @@ fun App(prefs: Prefs) {
             ToolItem(Icons.Filled.Apps, "QR Code", Color(0xFF00695C)) { openCam(CamMode.QR) },
             ToolItem(Icons.Filled.TextFields, "To Text", Color(0xFF2E7D32)) { openCam(CamMode.TEXT) },
             ToolItem(Icons.Filled.Edit, "Handwriting", Blue) { openCam(CamMode.HAND) },
-            ToolItem(Icons.Filled.Crop, "Google scanner", Color(0xFF00695C)) { startScan(Mode.SCAN) }),
+            ToolItem(Icons.Filled.Crop, "Crop tools", Color(0xFF00695C)) { toolStart = Tool.MERGE }),
         "Create" to listOf(
             ToolItem(Icons.Filled.Edit, "Text to PDF / Word", Blue) { studio = StudioInit("", DocTemplate.PLAIN) },
             ToolItem(Icons.Filled.Description, "Official Letter", Color(0xFF00897B)) { studio = StudioInit("", DocTemplate.LETTER) },
