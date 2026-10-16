@@ -60,17 +60,18 @@ class ReviewState(initial: List<Uri>) {
     val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val signatures = mutableStateListOf<List<Pair<Float, Float>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    val brushes = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
-            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList())
+            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList())
         }
     }
     fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
-        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
     }
     fun move(i: Int, d: Int) {
         val j = i + d
@@ -83,6 +84,7 @@ class ReviewState(initial: List<Uri>) {
         val wm = watermarks[i]; watermarks[i] = watermarks[j]; watermarks[j] = wm
         val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
         val hi = highlights[i]; highlights[i] = highlights[j]; highlights[j] = hi
+        val br = brushes[i]; brushes[i] = brushes[j]; brushes[j] = br
     }
 }
 
@@ -90,9 +92,10 @@ class ReviewState(initial: List<Uri>) {
 private fun compositeMarkup(
     bitmap: Bitmap, text: String, watermark: String,
     signature: List<Pair<Float, Float>> = emptyList(),
-    highlights: List<List<Pair<Float, Float>>> = emptyList()
+    highlights: List<List<Pair<Float, Float>>> = emptyList(),
+    brushes: List<List<Pair<Float, Float>>> = emptyList()
 ): Bitmap {
-    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty()) return bitmap
+    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty() && brushes.isEmpty()) return bitmap
     val canvas = android.graphics.Canvas(bitmap)
     val w = bitmap.width.toFloat()
     val h = bitmap.height.toFloat()
@@ -112,6 +115,24 @@ private fun compositeMarkup(
                 strokeJoin = android.graphics.Paint.Join.ROUND
             }
             canvas.drawPath(path, highlightPaint)
+        }
+    }
+    brushes.forEach { stroke ->
+        if (stroke.size > 1) {
+            val path = android.graphics.Path()
+            stroke.forEachIndexed { index, point ->
+                val x = point.first.coerceIn(0f, 1f) * w
+                val y = point.second.coerceIn(0f, 1f) * h
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val brushPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.rgb(25, 75, 160)
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = (w * 0.008f).coerceIn(5f, 16f)
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            canvas.drawPath(path, brushPaint)
         }
     }
     if (watermark.isNotBlank()) {
@@ -205,6 +226,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var showSignatureDialog by remember { mutableStateOf(false) }
     var signatureDraft by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var showHighlightDialog by remember { mutableStateOf(false) }
+    var drawingMode by remember { mutableStateOf("Highlight") }
     var highlightDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
     var activeHighlight by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var textDraft by remember { mutableStateOf("") }
@@ -244,7 +266,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     if (compareOriginal) "" else r.textOverlays[cur],
                     if (compareOriginal) "" else r.watermarks[cur],
                     if (compareOriginal) emptyList() else r.signatures[cur],
-                    if (compareOriginal) emptyList() else r.highlights[cur]
+                    if (compareOriginal) emptyList() else r.highlights[cur],
+                    if (compareOriginal) emptyList() else r.brushes[cur]
                 )
             }.getOrNull()
         }
@@ -259,7 +282,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     PageFilter.values().associateWith { f ->
                         compositeMarkup(
                             ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
-                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur]
+                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]
                         )
                     }
                 } finally {
@@ -282,7 +305,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 runCatching {
                     fun bmp(i: Int) = compositeMarkup(
                         ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
-                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i]
+                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
                     )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
@@ -318,7 +341,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     val ok = runCatching {
                         val b = compositeMarkup(
                             ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
-                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i]
+                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
                         )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
@@ -442,7 +465,12 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             signatureDraft = r.signatures[cur]; showSignatureDialog = true
                         }
                         BarButton(Icons.Filled.Edit, "Highlight") {
-                            highlightDraft = r.highlights[cur]; activeHighlight = emptyList(); showHighlightDialog = true
+                            drawingMode = "Highlight"; highlightDraft = r.highlights[cur]
+                            activeHighlight = emptyList(); showHighlightDialog = true
+                        }
+                        BarButton(Icons.Filled.Edit, "Brush") {
+                            drawingMode = "Brush"; highlightDraft = r.brushes[cur]
+                            activeHighlight = emptyList(); showHighlightDialog = true
                         }
                         BarButton(Icons.Filled.Image, "Watermark") {
                             watermarkDraft = r.watermarks[cur]; showWatermarkDialog = true
@@ -498,10 +526,10 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     )
     if (showHighlightDialog) AlertDialog(
         onDismissRequest = { showHighlightDialog = false },
-        title = { Text("Highlight page") },
+        title = { Text(if (drawingMode == "Brush") "Draw on page" else "Highlight page") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Draw over the area to highlight. You can add more than one stroke.")
+                Text(if (drawingMode == "Brush") "Draw a mark on the page. You can add more than one stroke." else "Draw over the area to highlight. You can add more than one stroke.")
                 androidx.compose.foundation.Canvas(
                     Modifier.fillMaxWidth().height(180.dp)
                         .clip(RoundedCornerShape(8.dp))
@@ -531,7 +559,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                                 val x = p.first * size.width; val y = p.second * size.height
                                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
                             }
-                            drawPath(path, Color(0xCCFFD600), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 14.dp.toPx()))
+                            drawPath(path, if (drawingMode == "Brush") Color(0xFF194BA0) else Color(0xCCFFD600), style = androidx.compose.ui.graphics.drawscope.Stroke(width = if (drawingMode == "Brush") 4.dp.toPx() else 14.dp.toPx()))
                         }
                     }
                 }
@@ -544,7 +572,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         confirmButton = { TextButton({
             val stroke = liveActiveHighlight
             val all = if (stroke.size > 1) liveHighlightDraft + listOf(stroke) else liveHighlightDraft
-            r.highlights[cur] = all
+            if (drawingMode == "Brush") r.brushes[cur] = all else r.highlights[cur] = all
             showHighlightDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showHighlightDialog = false }) { Text("Cancel") } }
