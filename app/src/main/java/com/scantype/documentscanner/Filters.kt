@@ -9,7 +9,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class PageFilter(val label: String) {
-    ORIGINAL("Original"), ENHANCE("Enhance"), NO_SHADOW("No Shadow"), GRAY("Grayscale"), BW("B&W")
+    ORIGINAL("Original"), ENHANCE("Enhance"), LIGHTEN("Lighten"), NO_SHADOW("No Shadow"), OMNIFIX("OmniFix"), BW("B&W")
 }
 
 object ImageFilters {
@@ -53,9 +53,10 @@ object ImageFilters {
     fun apply(src: Bitmap, f: PageFilter): Bitmap {
         val out = when (f) {
             PageFilter.ORIGINAL -> return src
-            PageFilter.ENHANCE -> colorFilter(src, 1.25f, 10f, 1.1f)
-            PageFilter.GRAY -> colorFilter(src, 1.15f, 5f, 0f)
+            PageFilter.ENHANCE -> colorFilter(src, 1.28f, 9f, 1.0f)
+            PageFilter.LIGHTEN -> colorFilter(src, 1.08f, 24f, 1.0f)
             PageFilter.NO_SHADOW -> normalize(src, false)
+            PageFilter.OMNIFIX -> omniFix(src)
             PageFilter.BW -> normalize(src, true)
         }
         if (out !== src) src.recycle()
@@ -75,25 +76,50 @@ object ImageFilters {
         return out
     }
 
-    /** Shadow removal: divides each pixel by the blurred local background (paper) brightness. */
+    /** OmniFix combines local paper normalization with a separate conservative contrast pass. */
+    private fun omniFix(src: Bitmap): Bitmap {
+        val normalized = normalize(src, false)
+        return try {
+            colorFilter(normalized, 1.16f, 4f, 0.92f)
+        } finally {
+            normalized.recycle()
+        }
+    }
+
+    /**
+     * Local paper normalization. A downsampled background estimates uneven illumination.
+     * The conservative threshold helps preserve thin writing and table lines.
+     */
     private fun normalize(src: Bitmap, bw: Boolean): Bitmap {
         val w = src.width; val h = src.height
-        val small = Bitmap.createScaledBitmap(src, max(1, w / 12), max(1, h / 12), true)
+        val small = Bitmap.createScaledBitmap(src, max(1, w / 16), max(1, h / 16), true)
         val bgBmp = Bitmap.createScaledBitmap(small, w, h, true)
         val p = IntArray(w * h); val b = IntArray(w * h)
-        src.getPixels(p, 0, w, 0, 0, w, h); bgBmp.getPixels(b, 0, w, 0, 0, w, h)
-        small.recycle(); if (bgBmp !== small) bgBmp.recycle()
+        try {
+            src.getPixels(p, 0, w, 0, 0, w, h)
+            bgBmp.getPixels(b, 0, w, 0, 0, w, h)
+        } finally {
+            small.recycle()
+            if (bgBmp !== small) bgBmp.recycle()
+        }
         for (i in p.indices) {
             val c = p[i]; val g = b[i]
             val r = c shr 16 and 0xFF; val gr = c shr 8 and 0xFF; val bl = c and 0xFF
-            val br = max(1, g shr 16 and 0xFF); val bg = max(1, g shr 8 and 0xFF); val bb = max(1, g and 0xFF)
+            val br = max(24, g shr 16 and 0xFF); val bg = max(24, g shr 8 and 0xFF); val bb = max(24, g and 0xFF)
+            val lum = (r * 30 + gr * 59 + bl * 11) / 100
+            val bgl = max(24, (br * 30 + bg * 59 + bb * 11) / 100)
             if (bw) {
-                val lum = (r * 30 + gr * 59 + bl * 11) / 100
-                val bgl = max(1, (br * 30 + bg * 59 + bb * 11) / 100)
-                p[i] = if (lum * 100 < bgl * 82) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+                // Compare ink with local paper brightness; keep pale paper white.
+                val localCutoff = (bgl * 0.80f).toInt().coerceIn(48, 210)
+                val cutoff = (localCutoff - if (bgl > 205) 0 else 8).coerceAtLeast(35)
+                p[i] = if (lum < cutoff) 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
             } else {
-                val nr = min(255, r * 255 / br); val ng = min(255, gr * 255 / bg); val nb = min(255, bl * 255 / bb)
-                p[i] = 0xFF shl 24 or (nr * nr / 255 shl 16) or (ng * ng / 255 shl 8) or (nb * nb / 255)
+                fun channel(v: Int, bgc: Int): Int {
+                    val ratio = (v * 230f / bgc).coerceIn(0f, 255f)
+                    return (ratio * ratio / 255f).toInt().coerceIn(0, 255)
+                }
+                val nr = channel(r, br); val ng = channel(gr, bg); val nb = channel(bl, bb)
+                p[i] = 0xFF shl 24 or (nr shl 16) or (ng shl 8) or nb
             }
         }
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.setPixels(p, 0, w, 0, 0, w, h) }

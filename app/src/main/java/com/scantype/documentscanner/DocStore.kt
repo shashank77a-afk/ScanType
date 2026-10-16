@@ -27,7 +27,8 @@ class DocStore(private val ctx: Context) {
 
     private fun newFile(prefix: String): File {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        return File(dir, "${prefix}_$ts.pdf")
+        // Several exports can complete within one second; never truncate an existing PDF.
+        return unique("${prefix}_$ts")
     }
     private fun clean(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     private fun unique(base: String): File {
@@ -120,7 +121,7 @@ class DocStore(private val ctx: Context) {
     }
 
     /** Builds a PDF from bitmaps supplied one at a time (each is recycled after use). */
-    fun bitmapsToPdf(n: Int, name: String, get: (Int) -> Bitmap) {
+    fun bitmapsToPdf(n: Int, name: String, get: (Int) -> Bitmap): File {
         val doc = PdfDocument()
         try {
             for (i in 0 until n) {
@@ -131,7 +132,9 @@ class DocStore(private val ctx: Context) {
                 p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
                 doc.finishPage(p); bmp.recycle()
             }
-            unique(name).outputStream().use { doc.writeTo(it) }
+            val out = unique(name)
+            out.outputStream().use { doc.writeTo(it) }
+            return out
         } finally { doc.close() }
     }
 
