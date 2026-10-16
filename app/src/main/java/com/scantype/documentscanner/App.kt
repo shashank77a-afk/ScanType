@@ -393,7 +393,10 @@ fun App(prefs: Prefs) {
         return
     }
     if (rv != null) {
-        BackHandler { review = null }
+        BackHandler {
+            review = null
+            if (editSourcePdf != null) clearSavedPdfEditSession()
+        }
         ScanReviewScreen(rv, store, prefs, snack, scope,
             onBack = {
                 review = null
