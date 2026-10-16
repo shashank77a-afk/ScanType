@@ -62,10 +62,14 @@ class DocStore(private val ctx: Context) {
         val t = File(f.parentFile, "$c.pdf")
         if (t.exists()) return
         val s = sidecar(f)
-        if (f.renameTo(t) && s.exists()) s.renameTo(File(f.parentFile, "$c.txt"))
+        val tagFile = tagsFile(f)
+        if (f.renameTo(t)) {
+            if (s.exists()) s.renameTo(File(f.parentFile, "$c.txt"))
+            if (tagFile.exists()) tagFile.renameTo(File(f.parentFile, "$c.tags"))
+        }
     }
     fun duplicate(f: File) { f.copyTo(File(f.parentFile, "${f.nameWithoutExtension}_copy.pdf"), overwrite = true) }
-    fun delete(f: File) { f.delete(); sidecar(f).delete() }
+    fun delete(f: File) { f.delete(); sidecar(f).delete(); tagsFile(f).delete() }
     fun folders(): List<String> =
         (listOf("School", "Personal", "Office", "Notes", "Certificates", "Other") +
             (dir.listFiles { x -> x.isDirectory }?.map { it.name } ?: emptyList())).distinct()
