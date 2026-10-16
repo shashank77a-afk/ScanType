@@ -49,6 +49,12 @@ class DocStore(private val ctx: Context) {
         return f
     }
     fun sidecar(f: File) = File(f.parentFile, f.nameWithoutExtension + ".txt")
+    fun tagsFile(f: File) = File(f.parentFile, f.nameWithoutExtension + ".tags")
+    fun tags(f: File): String = runCatching { tagsFile(f).takeIf { it.exists() }?.readText() ?: "" }.getOrDefault("")
+    fun saveTags(f: File, value: String) {
+        val safe = value.split(",").map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(20).joinToString(", ")
+        runCatching { tagsFile(f).writeText(safe) }
+    }
     fun searchText(f: File): String =
         runCatching { sidecar(f).takeIf { it.exists() }?.readText() ?: "" }.getOrDefault("")
     fun rename(f: File, name: String) {
