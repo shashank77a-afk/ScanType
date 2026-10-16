@@ -25,10 +25,12 @@ class DocStore(private val ctx: Context) {
         dir.walkTopDown().maxDepth(2).filter { it.isFile && it.extension == "pdf" }
             .sortedByDescending { it.lastModified() }.toList()
 
-    private fun newFile(prefix: String): File {
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        // Several exports can complete within one second; never truncate an existing PDF.
-        return unique("${prefix}_$ts")
+    private fun newFile(@Suppress("UNUSED_PARAMETER") prefix: String): File {
+        // Use the same human-readable default name as the scan review screen.
+        // Keep the time to minutes to match the requested ScannerAi dd-MM-yyyy HH.mm format.
+        val ts = SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date())
+        // Multiple exports in the same minute receive a suffix instead of overwriting.
+        return unique("ScannerAi $ts")
     }
     private fun clean(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     private fun unique(base: String): File {
@@ -116,6 +118,7 @@ class DocStore(private val ctx: Context) {
         }
     }
 
+
     fun thumb(f: File): Bitmap? = runCatching {
         PdfRenderer(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)).use { r ->
             r.openPage(0).use { p ->
@@ -165,13 +168,22 @@ class DocStore(private val ctx: Context) {
         try {
             for (i in 0 until n) {
                 val bmp = get(i)
-                val ph = (595f * bmp.height / bmp.width).toInt()
-                val p = doc.startPage(PdfDocument.PageInfo.Builder(595, ph, i + 1).create())
-                p.canvas.drawColor(Color.WHITE)
-                p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
-                doc.finishPage(p); bmp.recycle()
+                try {
+                    val ph = (595f * bmp.height / bmp.width).toInt()
+                    val p = doc.startPage(PdfDocument.PageInfo.Builder(595, ph, i + 1).create())
+                    p.canvas.drawColor(Color.WHITE)
+                    p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
+                    doc.finishPage(p)
+                } finally {
+                    if (!bmp.isRecycled) bmp.recycle()
+                }
             }
-            val out = unique(name)
+            // The default scan name format is always ScannerAi dd-MM-yyyy HH.mm.
+            // Use the title supplied from Review only when it is a custom user-edited title.
+            val defaultTitle = "ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date())
+            val candidate = if (name.startsWith("ScannerAi ") && Regex("""^ScannerAi \\d{2}-\\d{2}-\\d{4} \\d{2}\\.\\d{2}$""").matches(name))
+                name else defaultTitle
+            val out = unique(candidate)
             out.outputStream().use { doc.writeTo(it) }
             return out
         } finally { doc.close() }
