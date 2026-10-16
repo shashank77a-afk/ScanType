@@ -59,7 +59,7 @@ private data class PageEditSnapshot(
     val rotation: Int,
     val text: String,
     val watermark: String,
-    val signature: List<Pair<Float, Float>>,
+    val signature: List<List<Pair<Float, Float>>>,
     val highlights: List<List<Pair<Float, Float>>>,
     val brushes: List<List<Pair<Float, Float>>>
 )
@@ -71,7 +71,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
     val textOverlays = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
-    val signatures = mutableStateListOf<List<Pair<Float, Float>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    val signatures = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val brushes = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     private val undoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
@@ -86,7 +86,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     }
     private fun current(i: Int) = PageEditSnapshot(
         pages[i], origs[i], filters[i], rots[i], textOverlays[i], watermarks[i],
-        signatures[i].toList(), highlights[i].map { it.toList() }, brushes[i].map { it.toList() }
+        signatures[i].map { it.toList() }, highlights[i].map { it.toList() }, brushes[i].map { it.toList() }
     )
     private fun restore(i: Int, p: PageEditSnapshot) {
         pages[i] = p.page; origs[i] = p.original; filters[i] = p.filter; rots[i] = p.rotation
@@ -137,7 +137,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
 /** Composites annotations into the page bitmap so the same content reaches previews and exports. */
 private fun compositeMarkup(
     bitmap: Bitmap, text: String, watermark: String,
-    signature: List<Pair<Float, Float>> = emptyList(),
+    signature: List<List<Pair<Float, Float>>> = emptyList(),
     highlights: List<List<Pair<Float, Float>>> = emptyList(),
     brushes: List<List<Pair<Float, Float>>> = emptyList()
 ): Bitmap {
@@ -193,21 +193,23 @@ private fun compositeMarkup(
         canvas.drawText(watermark.take(80), w / 2f, h / 2f, paint)
         canvas.restore()
     }
-    if (signature.size > 1) {
-        val path = android.graphics.Path()
-        signature.forEachIndexed { index, point ->
-            val x = point.first.coerceIn(0f, 1f) * w
-            val y = point.second.coerceIn(0f, 1f) * h
-            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    signature.forEach { stroke ->
+        if (stroke.size > 1) {
+            val path = android.graphics.Path()
+            stroke.forEachIndexed { index, point ->
+                val x = point.first.coerceIn(0f, 1f) * w
+                val y = point.second.coerceIn(0f, 1f) * h
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val signaturePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.rgb(20, 45, 125)
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = (w * 0.006f).coerceIn(4f, 14f)
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            canvas.drawPath(path, signaturePaint)
         }
-        val signaturePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.rgb(20, 45, 125)
-            style = android.graphics.Paint.Style.STROKE
-            strokeWidth = (w * 0.006f).coerceIn(4f, 14f)
-            strokeCap = android.graphics.Paint.Cap.ROUND
-            strokeJoin = android.graphics.Paint.Join.ROUND
-        }
-        canvas.drawPath(path, signaturePaint)
     }
     if (text.isNotBlank()) {
         val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
@@ -270,7 +272,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var showTextDialog by remember { mutableStateOf(false) }
     var showWatermarkDialog by remember { mutableStateOf(false) }
     var showSignatureDialog by remember { mutableStateOf(false) }
-    var signatureDraft by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
+    var signatureDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
+    var activeSignature by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var showHighlightDialog by remember { mutableStateOf(false) }
     var drawingMode by remember { mutableStateOf("Highlight") }
     var highlightDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
@@ -278,6 +281,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var textDraft by remember { mutableStateOf("") }
     var watermarkDraft by remember { mutableStateOf("") }
     val liveSignatureDraft by rememberUpdatedState(signatureDraft)
+    val liveActiveSignature by rememberUpdatedState(activeSignature)
     val liveHighlightDraft by rememberUpdatedState(highlightDraft)
     val liveActiveHighlight by rememberUpdatedState(activeHighlight)
     var saving by remember { mutableStateOf(false) }
@@ -516,7 +520,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             textDraft = r.textOverlays[cur]; showTextDialog = true
                         }
                         BarButton(Icons.Filled.Edit, "Signature") {
-                            signatureDraft = r.signatures[cur]; showSignatureDialog = true
+                            signatureDraft = r.signatures[cur]; activeSignature = emptyList(); showSignatureDialog = true
                         }
                         BarButton(Icons.Filled.Edit, "Highlight") {
                             drawingMode = "Highlight"; highlightDraft = r.highlights[cur]
@@ -637,7 +641,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         title = { Text("Draw signature") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Draw with your finger. The signature will be placed on the current page and included in exports.")
+                Text("Draw with your finger. Lift your finger between strokes. The signature is included in exports.")
                 androidx.compose.foundation.Canvas(
                     Modifier.fillMaxWidth().height(180.dp)
                         .clip(RoundedCornerShape(8.dp))
@@ -645,74 +649,54 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         .pointerInput(Unit) {
                             detectDragGestures(
                                 onDragStart = { p ->
-                                    signatureDraft = liveSignatureDraft + listOf(
+                                    activeSignature = listOf(
                                         (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
                                     )
                                 },
                                 onDrag = { change, _ ->
                                     change.consume()
                                     val p = change.position
-                                    signatureDraft = signatureDraft + listOf(
+                                    activeSignature = liveActiveSignature + listOf(
                                         (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
                                     )
+                                },
+                                onDragEnd = {
+                                    val stroke = liveActiveSignature
+                                    if (stroke.size > 1) signatureDraft = liveSignatureDraft + listOf(stroke)
+                                    activeSignature = emptyList()
                                 }
                             )
                         }
                 ) {
-                    if (signatureDraft.size > 1) {
-                        val path = androidx.compose.ui.graphics.Path()
-                        signatureDraft.forEachIndexed { i, p ->
-                            val x = p.first * size.width
-                            val y = p.second * size.height
-                            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    (signatureDraft + listOf(activeSignature)).forEach { stroke ->
+                        if (stroke.size > 1) {
+                            val path = androidx.compose.ui.graphics.Path()
+                            stroke.forEachIndexed { i, p ->
+                                val x = p.first * size.width; val y = p.second * size.height
+                                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                            }
+                            drawPath(path, Color(0xFF142D7D), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
                         }
-                        drawPath(path, Color(0xFF142D7D), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx()))
                     }
                 }
-                TextButton(onClick = { signatureDraft = emptyList() }) { Text("Clear signature") }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TextButton(onClick = { signatureDraft = emptyList(); activeSignature = emptyList() }) { Text("Clear") }
+                    TextButton(onClick = {
+                        val stroke = liveActiveSignature
+                        if (stroke.size > 1) signatureDraft = liveSignatureDraft + listOf(stroke)
+                        activeSignature = emptyList()
+                    }) { Text("Keep stroke") }
+                }
             }
         },
         confirmButton = { TextButton({
-            r.pushUndo(cur); r.signatures[cur] = signatureDraft
+            val stroke = liveActiveSignature
+            r.pushUndo(cur)
+            r.signatures[cur] = if (stroke.size > 1) liveSignatureDraft + listOf(stroke) else liveSignatureDraft
             showSignatureDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showSignatureDialog = false }) { Text("Cancel") } }
     )
-    if (gDialog) AlertDialog({ gDialog = false }, title = { Text("Save to Gallery") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Saves the edited image(s) to your phone's Gallery, in the folder Pictures/ScannerAi.")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(!gPng, { gPng = false }, { Text("JPG") })
-                    FilterChip(gPng, { gPng = true }, { Text("PNG") })
-                }
-                if (r.pages.size > 1) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(gAll, { gAll = true }, { Text("All ${r.pages.size} pages") })
-                    FilterChip(!gAll, { gAll = false }, { Text("This page") })
-                }
-            }
-        },
-        confirmButton = { TextButton({ gDialog = false; gate { saveToGallery() } }) { Text("Save") } },
-        dismissButton = { TextButton({ gDialog = false }) { Text("Cancel") } })
-    if (fDialog) AlertDialog({ fDialog = false }, title = { Text("Finish document") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(
-                    "PDF of the scanned pages",
-                    "Searchable PDF (hidden text layer, offline)",
-                    "Original + typed text, page by page",
-                    "Original pages, then typed text section"
-                ).forEachIndexed { i, l ->
-                    Row(Modifier.fillMaxWidth().clickable { fMode = i }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(fMode == i, { fMode = i }); Text(l)
-                    }
-                }
-                if (fMode >= 2) Text("The text is read from each page now, using " + (if (prefs.aiReady) "AI recognition." else "on-device recognition (weak on handwriting)."),
-                    style = MaterialTheme.typography.bodySmall)
-            }
-        },
-        confirmButton = { TextButton({ fDialog = false; finish() }) { Text("Save PDF") } },
-        dismissButton = { TextButton({ fDialog = false }) { Text("Cancel") } })
     if (progress.isNotEmpty()) AlertDialog({}, confirmButton = {}, text = {
         Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(progress) }
     })
