@@ -128,13 +128,22 @@ class DocStore(private val ctx: Context) {
         try {
             for (i in 0 until n) {
                 val bmp = get(i)
-                val ph = (595f * bmp.height / bmp.width).toInt()
-                val p = doc.startPage(PdfDocument.PageInfo.Builder(595, ph, i + 1).create())
-                p.canvas.drawColor(Color.WHITE)
-                p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
-                doc.finishPage(p); bmp.recycle()
+                try {
+                    val ph = (595f * bmp.height / bmp.width).toInt()
+                    val p = doc.startPage(PdfDocument.PageInfo.Builder(595, ph, i + 1).create())
+                    p.canvas.drawColor(Color.WHITE)
+                    p.canvas.drawBitmap(bmp, null, Rect(0, 0, 595, ph), null)
+                    doc.finishPage(p)
+                } finally {
+                    if (!bmp.isRecycled) bmp.recycle()
+                }
             }
-            val out = unique(name)
+            // The default scan name format is always ScannerAi dd-MM-yyyy HH.mm.
+            // Use the title supplied from Review only when it is a custom user-edited title.
+            val defaultTitle = "ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date())
+            val candidate = if (name.startsWith("ScannerAi ") && Regex("""^ScannerAi \\d{2}-\\d{2}-\\d{4} \\d{2}\\.\\d{2}$""").matches(name))
+                name else defaultTitle
+            val out = unique(candidate)
             out.outputStream().use { doc.writeTo(it) }
             return out
         } finally { doc.close() }
