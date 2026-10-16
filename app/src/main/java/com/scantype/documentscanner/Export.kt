@@ -88,7 +88,8 @@ object Export {
 
     /**
      * Generate a collision-free display name without overwriting previous exports.
-     * The suffix check is performed within the destination collection/folder.
+     * Query failures must abort the save: treating an unknown result as "available"
+     * could overwrite a user's existing document on providers that allow duplicate names.
      */
     private fun uniqueMediaName(ctx: Context, collection: Uri, relativePath: String, display: String, ext: String): String {
         val base = display.trim().ifBlank { "ScannerAi" }
@@ -97,9 +98,9 @@ object Export {
         val projection = arrayOf(MediaStore.MediaColumns.DISPLAY_NAME)
         while (true) {
             val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-            val exists = runCatching {
-                ctx.contentResolver.query(collection, projection, selection, arrayOf(candidate, relativePath), null)?.use { it.moveToFirst() } ?: false
-            }.getOrDefault(false)
+            val cursor = ctx.contentResolver.query(collection, projection, selection, arrayOf(candidate, relativePath), null)
+                ?: error("Could not check whether Gallery filename already exists")
+            val exists = cursor.use { it.moveToFirst() }
             if (!exists) return candidate
             candidate = "${base}_${index++}.$ext"
         }
@@ -168,9 +169,9 @@ object Export {
             var index = 1
             while (true) {
                 val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
-                val exists = runCatching {
-                    cr.query(collection, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), selection, arrayOf(candidate, relative), null)?.use { it.moveToFirst() } ?: false
-                }.getOrDefault(false)
+                val cursor = cr.query(collection, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), selection, arrayOf(candidate, relative), null)
+                    ?: error("Could not check whether Downloads filename already exists")
+                val exists = cursor.use { it.moveToFirst() }
                 if (!exists) break
                 candidate = if (ext.isBlank()) "${base}_${index++}" else "${base}_${index++}.$ext"
             }
