@@ -56,7 +56,6 @@ fun App(prefs: Prefs) {
     var editor by remember { mutableStateOf<String?>(null) }
     var editorIsHandwriting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
-    var mode by remember { mutableStateOf(Mode.SCAN) }
     var batch by remember { mutableStateOf(true) }
     var camMode by remember { mutableStateOf<CamMode?>(null) }
     var review by remember { mutableStateOf<ReviewState?>(null) }
