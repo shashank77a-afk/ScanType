@@ -104,7 +104,7 @@ private fun compositeMarkup(bitmap: Bitmap, text: String, watermark: String): Bi
             typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
         }
         val safeText = text.take(500)
-        val lines = safeText.split("\\n").take(8)
+        val lines = safeText.split("\n").take(8)
         val lineHeight = paint.textSize * 1.25f
         val maxWidth = w * 0.82f
         val y0 = h - (lines.size * lineHeight) - h * 0.045f
