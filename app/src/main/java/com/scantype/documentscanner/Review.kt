@@ -696,6 +696,77 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showSignatureDialog = false }) { Text("Cancel") } }
     )
+    if (fDialog) AlertDialog(
+        onDismissRequest = { if (!saving) fDialog = false },
+        title = { Text("Finish document") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Choose the PDF format to create.")
+                listOf(
+                    0 to "Standard PDF",
+                    1 to "Searchable PDF",
+                    2 to "Original + typed text, page by page",
+                    3 to "Original pages, then typed text"
+                ).forEach { (mode, label) ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable(enabled = !saving) { fMode = mode }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = fMode == mode,
+                            onClick = { fMode = mode },
+                            enabled = !saving
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { fDialog = false; finish() },
+                enabled = !saving
+            ) { Text("Create PDF") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { fDialog = false },
+                enabled = !saving
+            ) { Text("Cancel") }
+        }
+    )
+
+    if (gDialog) AlertDialog(
+        onDismissRequest = { if (!saving) gDialog = false },
+        title = { Text("Save pages to Gallery") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = gAll, onCheckedChange = { gAll = it }, enabled = !saving)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Save all pages")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = gPng, onCheckedChange = { gPng = it }, enabled = !saving)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Use PNG format instead of JPEG")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { gDialog = false; saveToGallery() },
+                enabled = !saving
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = { gDialog = false }, enabled = !saving) { Text("Cancel") }
+        }
+    )
+
     if (progress.isNotEmpty()) AlertDialog({}, confirmButton = {}, text = {
         Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(28.dp)); Spacer(Modifier.width(16.dp)); Text(progress) }
     })
