@@ -64,10 +64,10 @@ private data class PageEditSnapshot(
     val brushes: List<List<Pair<Float, Float>>>
 )
 
-class ReviewState(initial: List<Uri>) {
+class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENHANCE) {
     val pages = mutableStateListOf<Uri>().apply { addAll(initial) }
     val origs = mutableStateListOf<Uri>().apply { addAll(initial) }
-    val filters = mutableStateListOf<PageFilter>().apply { repeat(initial.size) { add(PageFilter.ENHANCE) } }
+    val filters = mutableStateListOf<PageFilter>().apply { repeat(initial.size) { add(initialFilter) } }
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
     val textOverlays = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
@@ -77,9 +77,9 @@ class ReviewState(initial: List<Uri>) {
     private val undoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     private val redoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
-    fun add(u: List<Uri>) {
+    fun add(u: List<Uri>, initialFilter: PageFilter = filters.lastOrNull() ?: PageFilter.ENHANCE) {
         u.forEach {
-            pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
+            pages.add(it); origs.add(it); filters.add(initialFilter); rots.add(0)
             textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList())
             undoStacks.add(mutableListOf()); redoStacks.add(mutableListOf())
         }
@@ -111,7 +111,7 @@ class ReviewState(initial: List<Uri>) {
         undoStacks[i].add(current(i))
         restore(i, redoStacks[i].removeAt(redoStacks[i].lastIndex))
     }
-    fun replace(i: Int, u: Uri) { pushUndo(i); pages[i] = u; origs[i] = u; rots[i] = 0 }
+    fun replace(i: Int, u: Uri, filter: PageFilter = filters[i]) { pushUndo(i); pages[i] = u; origs[i] = u; filters[i] = filter; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
         textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
