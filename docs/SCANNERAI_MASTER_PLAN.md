@@ -14,8 +14,8 @@
 - [x] Use `ScannerAi DD-MM-YYYY HH.mm` as the scan-review default filename.
 - [x] Export finished scan PDFs to `Download/ScannerAi/` and Gallery images to `Pictures/ScannerAi/`.
 - [ ] Review Home, Files, Tools, and Me screens for visual consistency on multiple screen sizes.
-- [ ] Add robust collision handling and verify MediaStore/legacy storage behavior on Android 10+ and Android 9.
-- [ ] Implement a dedicated document preview/viewer with page thumbnails and Open/Edit/Share/Save actions.
+- [x] Add unique names for app-private PDF exports and Gallery/Downloads exports; remove incomplete MediaStore entries after a failed save.\n- [ ] Verify MediaStore/legacy storage behavior on real devices running Android 10+ and Android 9.
+- [x] Add a dedicated in-app PDF preview with page thumbnails, page navigation, external open, share, print, save-to-Downloads and a page-tools entry point (device QA and richer editing remain).
 
 ## Phase 2 — Custom CameraX scanner
 - [x] Retain the in-app CameraX camera and existing edge-detection path.
@@ -57,4 +57,4 @@
 - [ ] Only mark Phase 5 complete after device testing; CI success alone is not device verification.
 
 ## Current implementation notes
-This branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, lifecycle-safe bitmap cleanup, Android 12+ live filtered camera preview, camera light/glare hints, consistent multi-page filter selection, per-page Undo/Redo, Images/Markup/Page tabs, and page-aware text/signature/brush/highlight/watermark overlays have been added. Real-device filter/annotation QA, older-device camera behavior, broader edge tuning, several advanced PDF actions, and full regression testing remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
+The app now includes an in-app PDF viewer with page thumbnails and actions for external open, share, print, save-to-Downloads and page tools. Export paths avoid reusing existing PDF/media display names and clean up failed MediaStore inserts; these changes still require real-device validation.\nThis branch is an incremental implementation, not yet the finished five-phase release. Filter normalization/B&W thresholding, Original comparison/reset, lifecycle-safe bitmap cleanup, Android 12+ live filtered camera preview, camera light/glare hints, consistent multi-page filter selection, per-page Undo/Redo, Images/Markup/Page tabs, and page-aware text/signature/brush/highlight/watermark overlays have been added. Real-device filter/annotation QA, older-device camera behavior, broader edge tuning, several advanced PDF actions, and full regression testing remain outstanding. GitHub Actions builds must pass after the latest commit; CI success is not a substitute for testing on a phone.
