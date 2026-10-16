@@ -546,6 +546,13 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             }
                         }
                         BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
+                        BarButton(Icons.Filled.Image, "Filter") {
+                            val targets = if (applyAll) r.filters.indices.toList() else listOf(cur)
+                            filterPanelOriginals = targets.associateWith { r.filters[it] }
+                            targets.forEach { r.pushUndo(it) }
+                            compareOriginal = false
+                            showFilterPanel = true
+                        }
                         BarButton(Icons.Filled.RotateLeft, "Rotate") { r.pushUndo(cur); r.rots[cur] = (rot + 270) % 360 }
                         BarButton(Icons.Filled.Image, "Reset") {
                             r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL
