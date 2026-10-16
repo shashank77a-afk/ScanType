@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -292,6 +293,7 @@ private fun FilterEditPanel(
     selected: PageFilter,
     compareOriginal: Boolean,
     applyAll: Boolean,
+    onApplyAllChanged: (Boolean) -> Unit,
     onCompare: () -> Unit,
     onSelect: (PageFilter) -> Unit,
     onCancel: () -> Unit,
@@ -333,7 +335,6 @@ private fun FilterEditPanel(
                 IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Cancel filter") }
                 Text("Filter", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 TextButton(onCompare) { Text(if (compareOriginal) "Show Filter" else "Compare") }
-                IconButton(onApply) { Icon(Icons.Filled.Add, "Apply filter", tint = MaterialTheme.colorScheme.primary) }
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                 when {
@@ -348,7 +349,7 @@ private fun FilterEditPanel(
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Same filter for all pages", Modifier.weight(1f), color = MaterialTheme.colorScheme.onBackground)
-                Switch(checked = applyAll, onCheckedChange = { /* parent setting stays consistent with main editor */ })
+                Switch(checked = applyAll, onCheckedChange = onApplyAllChanged)
             }
             LazyRow(
                 Modifier.fillMaxWidth().padding(vertical = 12.dp),
@@ -374,10 +375,12 @@ private fun FilterEditPanel(
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onCancel, Modifier.weight(1f)) { Text("Cancel") }
-                Spacer(Modifier.width(12.dp))
-                Button(onApply, Modifier.weight(1f)) { Text("Apply") }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Cancel filter") }
+                Spacer(Modifier.weight(1f))
+                Text("Filter", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                IconButton(onApply) { Icon(Icons.Filled.Check, "Apply filter", tint = MaterialTheme.colorScheme.primary) }
             }
         }
     }
@@ -542,8 +545,8 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             selected = flt,
             compareOriginal = compareOriginal,
             applyAll = applyAll,
-            onCompare = { compareOriginal = !compareOriginal },
-            onSelect = { f -> if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f },
+            onApplyAllChanged = { applyAll = it },
+            onCompare = { compareOriginal = !compareOriginal },            onSelect = { f -> if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f },
             onCancel = {
                 filterPanelOriginals.forEach { (i, old) -> if (i in r.filters.indices) r.filters[i] = old }
                 filterPanelOriginals.keys.forEach { i -> if (r.canUndo(i)) r.undo(i) }
