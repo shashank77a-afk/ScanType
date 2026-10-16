@@ -548,6 +548,45 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
         }
     }
+    if (fDialog) AlertDialog(
+        onDismissRequest = { fDialog = false },
+        title = { Text("Finish document") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Choose the PDF format for your scanned document.")
+                listOf(
+                    "Standard PDF",
+                    "Searchable PDF",
+                    "Original + Typed PDF",
+                    "Original + Typed PDF (typed pages at end)"
+                ).forEachIndexed { index, label ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { fMode = index }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = fMode == index, onClick = { fMode = index })
+                        Spacer(Modifier.width(8.dp))
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !saving,
+                onClick = {
+                    fDialog = false
+                    // Mode 2 puts typed text after each scan; mode 3 places it at the end.
+                    fMode = when (fMode) {
+                        3 -> 3
+                        else -> fMode
+                    }
+                    finish()
+                }
+            ) { Text("Save PDF") }
+        },
+        dismissButton = { TextButton(onClick = { fDialog = false }) { Text("Cancel") } }
+    )
     if (showTextDialog) AlertDialog(
         onDismissRequest = { showTextDialog = false },
         title = { Text("Add text to page") },
