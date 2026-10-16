@@ -195,7 +195,7 @@ object Export {
             val ext = name.substringAfterLast('.', "")
             var d = File(dir, name); var n = 1
             while (d.exists()) d = File(dir, if (ext.isBlank()) "${base}_${n++}" else "${base}_${n++}.$ext")
-            FileInputStream(f).use { i -> d.outputStream().use { it.copyTo(o) } }
+            FileInputStream(f).use { i -> d.outputStream().use { o -> i.copyTo(o) } }
             MediaScannerConnection.scanFile(ctx, arrayOf(d.path), arrayOf(mime), null)
         }
         true
