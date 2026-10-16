@@ -53,12 +53,20 @@ class ReviewState(initial: List<Uri>) {
     val origs = mutableStateListOf<Uri>().apply { addAll(initial) }
     val filters = mutableStateListOf<PageFilter>().apply { repeat(initial.size) { add(PageFilter.ENHANCE) } }
     val rots = mutableStateListOf<Int>().apply { repeat(initial.size) { add(0) } }
+    val textOverlays = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
+    val watermarks = mutableStateListOf<String>().apply { repeat(initial.size) { add("") } }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>) {
-        u.forEach { pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0) }
+        u.forEach {
+            pages.add(it); origs.add(it); filters.add(filters.lastOrNull() ?: PageFilter.ENHANCE); rots.add(0)
+            textOverlays.add(""); watermarks.add("")
+        }
     }
     fun replace(i: Int, u: Uri) { pages[i] = u; origs[i] = u; rots[i] = 0 }
-    fun remove(i: Int) { pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i) }
+    fun remove(i: Int) {
+        pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i)
+    }
     fun move(i: Int, d: Int) {
         val j = i + d
         if (j < 0 || j >= pages.size) return
@@ -66,7 +74,54 @@ class ReviewState(initial: List<Uri>) {
         val o = origs[i]; origs[i] = origs[j]; origs[j] = o
         val f = filters[i]; filters[i] = filters[j]; filters[j] = f
         val r = rots[i]; rots[i] = rots[j]; rots[j] = r
+        val t = textOverlays[i]; textOverlays[i] = textOverlays[j]; textOverlays[j] = t
+        val wm = watermarks[i]; watermarks[i] = watermarks[j]; watermarks[j] = wm
     }
+}
+
+/** Composites annotations into the page bitmap so the same content reaches previews and exports. */
+private fun compositeMarkup(bitmap: Bitmap, text: String, watermark: String): Bitmap {
+    if (text.isBlank() && watermark.isBlank()) return bitmap
+    val canvas = android.graphics.Canvas(bitmap)
+    val w = bitmap.width.toFloat()
+    val h = bitmap.height.toFloat()
+    if (watermark.isNotBlank()) {
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(105, 90, 90, 90)
+            textSize = (w * 0.065f).coerceIn(22f, 100f)
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        canvas.save()
+        canvas.rotate(-24f, w / 2f, h / 2f)
+        canvas.drawText(watermark.take(80), w / 2f, h / 2f, paint)
+        canvas.restore()
+    }
+    if (text.isNotBlank()) {
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.BLACK
+            textSize = (w * 0.032f).coerceIn(18f, 48f)
+            typeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+        }
+        val safeText = text.take(500)
+        val lines = safeText.split("\\n").take(8)
+        val lineHeight = paint.textSize * 1.25f
+        val maxWidth = w * 0.82f
+        val y0 = h - (lines.size * lineHeight) - h * 0.045f
+        val rectPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.argb(220, 255, 255, 255)
+        }
+        canvas.drawRoundRect(
+            w * 0.045f, y0 - paint.textSize * 0.5f, w * 0.955f, h - h * 0.025f,
+            w * 0.01f, w * 0.01f, rectPaint
+        )
+        lines.forEachIndexed { index, line ->
+            var clipped = line
+            while (paint.measureText(clipped) > maxWidth && clipped.isNotEmpty()) clipped = clipped.dropLast(1)
+            canvas.drawText(clipped, w * 0.06f, y0 + index * lineHeight, paint)
+        }
+    }
+    return bitmap
 }
 
 @Composable
@@ -99,6 +154,11 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var idx by remember { mutableIntStateOf(0) }
     var applyAll by remember { mutableStateOf(true) }
     var compareOriginal by remember { mutableStateOf(false) }
+    var editorTab by remember { mutableStateOf("Images") }
+    var showTextDialog by remember { mutableStateOf(false) }
+    var showWatermarkDialog by remember { mutableStateOf(false) }
+    var textDraft by remember { mutableStateOf("") }
+    var watermarkDraft by remember { mutableStateOf("") }
     var saving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var gDialog by remember { mutableStateOf(false) }
@@ -126,7 +186,13 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         value?.let { old -> runCatching { old.recycle() } }
         value = null
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt) }.getOrNull()
+            runCatching {
+                compositeMarkup(
+                    ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
+                    if (compareOriginal) "" else r.textOverlays[cur],
+                    if (compareOriginal) "" else r.watermarks[cur]
+                )
+            }.getOrNull()
         }
     }
     val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot) {
@@ -137,7 +203,10 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 val base = ImageFilters.rotate(ImageFilters.load(ctx, page, 220), rot)
                 try {
                     PageFilter.values().associateWith { f ->
-                        ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f)
+                        compositeMarkup(
+                            ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
+                            r.textOverlays[cur], r.watermarks[cur]
+                        )
                     }
                 } finally {
                     base.recycle()
@@ -157,7 +226,10 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             saving = true
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    fun bmp(i: Int) = ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i])
+                    fun bmp(i: Int) = compositeMarkup(
+                        ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
+                        r.textOverlays[i], r.watermarks[i]
+                    )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
                         1 -> store.newFileExt(name, "pdf").also { PdfBuilders.searchable(it, pages.size) { i -> bmp(i) } }
@@ -190,7 +262,10 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 var count = 0
                 for (i in which) {
                     val ok = runCatching {
-                        val b = ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i])
+                        val b = compositeMarkup(
+                            ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
+                            r.textOverlays[i], r.watermarks[i]
+                        )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
                     }.getOrDefault(false)
@@ -270,24 +345,97 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
-                Box {
-                    BarButton(Icons.Filled.Add, "Add") { addMenu = true }
-                    DropdownMenu(addMenu, { addMenu = false }) {
-                        DropdownMenuItem({ Text("Camera") }, { addMenu = false; onAddCamera() })
-                        DropdownMenuItem({ Text("Gallery") }, { addMenu = false; pickG.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-                        DropdownMenuItem({ Text("Files") }, { addMenu = false; pickF.launch(arrayOf("image/*")) })
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                listOf("Images", "Markup", "Page").forEach { tabName ->
+                    FilterChip(
+                        selected = editorTab == tabName,
+                        onClick = { editorTab = tabName },
+                        label = { Text(tabName) }
+                    )
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                when (editorTab) {
+                    "Images" -> {
+                        BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
+                        Box {
+                            BarButton(Icons.Filled.Add, "Add") { addMenu = true }
+                            DropdownMenu(addMenu, { addMenu = false }) {
+                                DropdownMenuItem({ Text("Camera") }, { addMenu = false; onAddCamera() })
+                                DropdownMenuItem({ Text("Gallery") }, { addMenu = false; pickG.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+                                DropdownMenuItem({ Text("Files") }, { addMenu = false; pickF.launch(arrayOf("image/*")) })
+                            }
+                        }
+                        BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
+                        BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
+                        BarButton(Icons.Filled.Image, "Reset") {
+                            r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL
+                            r.rots[cur] = 0; compareOriginal = false
+                        }
+                    }
+                    "Markup" -> {
+                        BarButton(Icons.Filled.TextFields, "Add Text") {
+                            textDraft = r.textOverlays[cur]; showTextDialog = true
+                        }
+                        BarButton(Icons.Filled.Image, "Watermark") {
+                            watermarkDraft = r.watermarks[cur]; showWatermarkDialog = true
+                        }
+                        BarButton(Icons.Filled.TextFields, "Read Text") { onExtract() }
+                        BarButton(Icons.Filled.Image, "Gallery") { gDialog = true }
+                    }
+                    else -> {
+                        BarButton(Icons.Filled.Add, "Add Page") { addMenu = true }
+                        BarButton(Icons.Filled.Delete, "Delete") { r.remove(cur); idx = (cur - 1).coerceAtLeast(0) }
+                        BarButton(Icons.Filled.ArrowBack, "Move Left") { if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }
+                        BarButton(Icons.Filled.ArrowForward, "Move Right") { if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }
                     }
                 }
-                BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
-                BarButton(Icons.Filled.RotateLeft, "Rotate") { r.rots[cur] = (rot + 270) % 360 }
-                BarButton(Icons.Filled.Image, "Original") { r.pages[cur] = r.origs[cur]; r.filters[cur] = PageFilter.ORIGINAL; r.rots[cur] = 0; compareOriginal = false }
-                BarButton(Icons.Filled.TextFields, "Text") { onExtract() }
-                BarButton(Icons.Filled.Image, "Images") { gDialog = true }
             }
         }
     }
+    if (showTextDialog) AlertDialog(
+        onDismissRequest = { showTextDialog = false },
+        title = { Text("Add text to page") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("This text will be added to the current page and included when you export it.")
+                androidx.compose.material3.OutlinedTextField(
+                    value = textDraft, onValueChange = { textDraft = it },
+                    label = { Text("Text (up to 500 characters)") }, minLines = 2, maxLines = 5
+                )
+            }
+        },
+        confirmButton = { TextButton({
+            r.textOverlays[cur] = textDraft.take(500)
+            showTextDialog = false
+        }) { Text("Apply") } },
+        dismissButton = { TextButton({ showTextDialog = false }) { Text("Cancel") } }
+    )
+    if (showWatermarkDialog) AlertDialog(
+        onDismissRequest = { showWatermarkDialog = false },
+        title = { Text("Page watermark") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("The watermark is composited into the current page and included in exports.")
+                androidx.compose.material3.OutlinedTextField(
+                    value = watermarkDraft, onValueChange = { watermarkDraft = it },
+                    label = { Text("Watermark (up to 80 characters)") }, singleLine = true
+                )
+            }
+        },
+        confirmButton = { TextButton({
+            r.watermarks[cur] = watermarkDraft.take(80)
+            showWatermarkDialog = false
+        }) { Text("Apply") } },
+        dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
+    )
     if (gDialog) AlertDialog({ gDialog = false }, title = { Text("Save to Gallery") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
