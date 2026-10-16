@@ -185,6 +185,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var signatureDraft by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var textDraft by remember { mutableStateOf("") }
     var watermarkDraft by remember { mutableStateOf("") }
+    val liveSignatureDraft by rememberUpdatedState(signatureDraft)
     var saving by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf("") }
     var gDialog by remember { mutableStateOf(false) }
@@ -479,7 +480,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                         .pointerInput(Unit) {
                             detectDragGestures(
                                 onDragStart = { p ->
-                                    signatureDraft = signatureDraft + listOf(
+                                    signatureDraft = liveSignatureDraft + listOf(
                                         (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
                                     )
                                 },
