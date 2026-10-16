@@ -272,8 +272,8 @@ fun App(prefs: Prefs) {
         CameraScreen(cm, { camMode = it }, batch, { batch = it }, prefs,
             if (cm == CamMode.ID) (if (idSide == 0) "ID Card: scan the FRONT side" else "ID Card: scan the BACK side") else null,
             { uris, m -> onCaptured(uris, m) },
-            { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null },
-            })
+            { camMode = null; retakeIdx = null; letterTarget = false; if (review?.pages?.isEmpty() == true) review = null }
+        )
         return
     }
     val ids = idState
