@@ -437,7 +437,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
     var previewRetry by remember { mutableIntStateOf(0) }
-    val previewState by produceState<Result<Bitmap>?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], previewRetry) {
+    val previewState by produceState<Result<Bitmap>?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur], previewRetry) {
         // Keep loading and failure separate so a failed filter never leaves an endless spinner.
         value = null
         value = withContext(Dispatchers.Default) {
@@ -454,7 +454,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
     val preview = previewState?.getOrNull()
-    val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
+    val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur]) {
         value = emptyMap()
         value = withContext(Dispatchers.Default) {
             runCatching {
@@ -545,8 +545,18 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             selected = flt,
             compareOriginal = compareOriginal,
             applyAll = applyAll,
-            onApplyAllChanged = { applyAll = it },
-            onCompare = { compareOriginal = !compareOriginal },            onSelect = { f -> if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f },
+            onApplyAllChanged = { next ->
+                if (next && !applyAll) {
+                    val missing = r.filters.indices.filterNot { it in filterPanelOriginals }
+                    filterPanelOriginals = filterPanelOriginals + missing.associateWith { r.filters[it] }
+                    missing.forEach { r.pushUndo(it) }
+                }
+                applyAll = next
+            },
+            onCompare = { compareOriginal = !compareOriginal },            onSelect = { f ->
+                compareOriginal = false
+                if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f
+            },
             onCancel = {
                 filterPanelOriginals.forEach { (i, old) -> if (i in r.filters.indices) r.filters[i] = old }
                 filterPanelOriginals.keys.forEach { i -> if (r.canUndo(i)) r.undo(i) }
