@@ -91,7 +91,7 @@ class DocStore(private val ctx: Context) {
             PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { renderer ->
                 for (index in 0 until renderer.pageCount) {
                     renderer.openPage(index).use { page ->
-                        val width = 1800
+                        val width = 1400
                         val height = (width * page.height.toFloat() / page.width).toInt().coerceAtLeast(1)
                         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                         try {
