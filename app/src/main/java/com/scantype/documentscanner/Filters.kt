@@ -56,7 +56,7 @@ object ImageFilters {
             PageFilter.ENHANCE -> colorFilter(src, 1.28f, 9f, 1.0f)
             PageFilter.LIGHTEN -> colorFilter(src, 1.08f, 24f, 1.0f)
             PageFilter.NO_SHADOW -> normalize(src, false)
-            PageFilter.OMNIFIX -> normalize(src, false)
+            PageFilter.OMNIFIX -> omniFix(src)
             PageFilter.BW -> normalize(src, true)
         }
         if (out !== src) src.recycle()
@@ -74,6 +74,16 @@ object ImageFilters {
         val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         Canvas(out).drawBitmap(src, 0f, 0f, Paint().apply { colorFilter = ColorMatrixColorFilter(cm) })
         return out
+    }
+
+    /** OmniFix combines local paper normalization with a separate conservative contrast pass. */
+    private fun omniFix(src: Bitmap): Bitmap {
+        val normalized = normalize(src, false)
+        return try {
+            colorFilter(normalized, 1.16f, 4f, 0.92f)
+        } finally {
+            normalized.recycle()
+        }
     }
 
     /** Shadow removal: divides each pixel by the blurred local background (paper) brightness. */
