@@ -329,7 +329,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                 else Box(Modifier.size(84.dp).border(4.dp, Color.White, CircleShape).padding(8.dp)
                     .clip(CircleShape).background(Color.White).clickable(enabled = !busy) { shoot() })
                 Box(Modifier.width(72.dp), contentAlignment = Alignment.Center) {
-                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode) }) { Text("Done (${shots.size})") }
+                    if (mode == CamMode.DOCS && batch && shots.isNotEmpty()) Button({ onDone(shots.toList(), mode, filterNow) }) { Text("Done (${shots.size})") }
                 }
             }
         }
