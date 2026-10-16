@@ -40,11 +40,15 @@ private fun nearest(pts: List<Offset>, o: Offset, sz: IntSize): Int {
 fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCancel: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val bmp by produceState<Bitmap?>(null, uri, rot) {
+    var loadRetry by remember { mutableIntStateOf(0) }
+    var cropRotation by remember(uri, rot) { mutableIntStateOf(rot) }
+    val cropState by produceState<Result<Bitmap>?>(null, uri, cropRotation, loadRetry) {
+        value = null
         value = withContext(Dispatchers.Default) {
-            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 2000), rot) }.getOrNull()
+            runCatching { ImageFilters.rotate(ImageFilters.load(ctx, uri, 1200), cropRotation) }
         }
     }
+    val bmp = cropState?.getOrNull()
     DisposableEffect(bmp) {
         onDispose { bmp?.let { image -> if (!image.isRecycled) runCatching { image.recycle() } } }
     }
@@ -63,18 +67,19 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(title, color = Color.White, fontSize = 18.sp, modifier = Modifier.weight(1f))
-                TextButton({ auto(true) }) { Text("Auto", color = Cyan) }
-                TextButton({
-                    pts[0] = Offset(0.06f, 0.06f); pts[1] = Offset(0.94f, 0.06f)
-                    pts[2] = Offset(0.94f, 0.94f); pts[3] = Offset(0.06f, 0.94f)
-                }) { Text("Reset", color = Cyan) }
             }
             Text("Drag the 4 corners to fit the edges of the document.", color = Color.White.copy(alpha = 0.8f),
                 fontSize = 13.sp, modifier = Modifier.padding(horizontal = 12.dp))
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                 val b = bmp
-                if (b == null) CircularProgressIndicator(color = Cyan)
-                else {
+                if (b == null) {
+                    if (cropState == null) CircularProgressIndicator(color = Cyan)
+                    else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Could not load this page.", color = Color.White)
+                        TextButton(onClick = { loadRetry++ }) { Text("Retry", color = Cyan) }
+                        TextButton(onCancel) { Text("Cancel", color = Cyan) }
+                    }
+                } else {
                     val ar = b.width.toFloat() / b.height
                     val w = if (maxWidth / maxHeight > ar) maxHeight * ar else maxWidth
                     val h = w / ar
@@ -100,6 +105,15 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                TextButton(onClick = { cropRotation = (cropRotation + 270) % 360 }) { Text("Left", color = Cyan) }
+                TextButton(onClick = { cropRotation = (cropRotation + 90) % 360 }) { Text("Right", color = Cyan) }
+                TextButton(onClick = { auto(true) }) { Text("Auto Crop", color = Cyan) }
+                TextButton(onClick = {
+                    pts[0] = Offset(0.01f, 0.01f); pts[1] = Offset(0.99f, 0.01f)
+                    pts[2] = Offset(0.99f, 0.99f); pts[3] = Offset(0.01f, 0.99f)
+                }) { Text("All", color = Cyan) }
+            }
             Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onCancel, Modifier.weight(1f)) { Text("Cancel", color = Color.White) }
                 Button({
@@ -111,9 +125,14 @@ fun CropScreen(uri: Uri, rot: Int, title: String, onDone: (Uri) -> Unit, onCance
                             runCatching {
                                 val w = ImageFilters.warp(src, xy)
                                 val f = File(ctx.cacheDir, "crop_${System.currentTimeMillis()}.jpg")
-                                f.outputStream().use { w.compress(Bitmap.CompressFormat.JPEG, 92, it) }
-                                w.recycle()
-                                Uri.fromFile(f)
+                                try {
+                                    f.outputStream().use { stream ->
+                                        check(w.compress(Bitmap.CompressFormat.JPEG, 90, stream)) { "Could not save cropped page" }
+                                    }
+                                    Uri.fromFile(f)
+                                } finally {
+                                    if (!w.isRecycled) w.recycle()
+                                }
                             }.getOrNull()
                         }
                         working = false

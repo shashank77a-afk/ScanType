@@ -1,6 +1,7 @@
 package com.scantype.documentscanner
 
 import android.graphics.Bitmap
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,9 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -61,7 +65,8 @@ private data class PageEditSnapshot(
     val watermark: String,
     val signature: List<List<Pair<Float, Float>>>,
     val highlights: List<List<Pair<Float, Float>>>,
-    val brushes: List<List<Pair<Float, Float>>>
+    val brushes: List<List<Pair<Float, Float>>>,
+    val erasures: List<List<Pair<Float, Float>>>
 )
 
 class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENHANCE) {
@@ -74,24 +79,25 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     val signatures = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val highlights = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     val brushes = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
+    val erasures = mutableStateListOf<List<List<Pair<Float, Float>>>>().apply { repeat(initial.size) { add(emptyList()) } }
     private val undoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     private val redoStacks = MutableList(initial.size) { mutableListOf<PageEditSnapshot>() }
     var title by mutableStateOf("ScannerAi " + SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date()))
     fun add(u: List<Uri>, initialFilter: PageFilter = filters.lastOrNull() ?: PageFilter.ENHANCE) {
         u.forEach {
             pages.add(it); origs.add(it); filters.add(initialFilter); rots.add(0)
-            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList())
+            textOverlays.add(""); watermarks.add(""); signatures.add(emptyList()); highlights.add(emptyList()); brushes.add(emptyList()); erasures.add(emptyList())
             undoStacks.add(mutableListOf()); redoStacks.add(mutableListOf())
         }
     }
     private fun current(i: Int) = PageEditSnapshot(
         pages[i], origs[i], filters[i], rots[i], textOverlays[i], watermarks[i],
-        signatures[i].map { it.toList() }, highlights[i].map { it.toList() }, brushes[i].map { it.toList() }
+        signatures[i].map { it.toList() }, highlights[i].map { it.toList() }, brushes[i].map { it.toList() }, erasures[i].map { it.toList() }
     )
     private fun restore(i: Int, p: PageEditSnapshot) {
         pages[i] = p.page; origs[i] = p.original; filters[i] = p.filter; rots[i] = p.rotation
         textOverlays[i] = p.text; watermarks[i] = p.watermark; signatures[i] = p.signature
-        highlights[i] = p.highlights; brushes[i] = p.brushes
+        highlights[i] = p.highlights; brushes[i] = p.brushes; erasures[i] = p.erasures
     }
     fun pushUndo(i: Int) {
         if (i !in pages.indices) return
@@ -115,7 +121,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
     fun setCroppedPage(i: Int, u: Uri) { pushUndo(i); pages[i] = u; rots[i] = 0 }
     fun remove(i: Int) {
         pages.removeAt(i); origs.removeAt(i); filters.removeAt(i); rots.removeAt(i)
-        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i)
+        textOverlays.removeAt(i); watermarks.removeAt(i); signatures.removeAt(i); highlights.removeAt(i); brushes.removeAt(i); erasures.removeAt(i)
         undoStacks.removeAt(i); redoStacks.removeAt(i)
     }
     fun move(i: Int, d: Int) {
@@ -130,6 +136,7 @@ class ReviewState(initial: List<Uri>, initialFilter: PageFilter = PageFilter.ENH
         val sig = signatures[i]; signatures[i] = signatures[j]; signatures[j] = sig
         val hi = highlights[i]; highlights[i] = highlights[j]; highlights[j] = hi
         val br = brushes[i]; brushes[i] = brushes[j]; brushes[j] = br
+        val er = erasures[i]; erasures[i] = erasures[j]; erasures[j] = er
         val un = undoStacks[i]; undoStacks[i] = undoStacks[j]; undoStacks[j] = un
         val re = redoStacks[i]; redoStacks[i] = redoStacks[j]; redoStacks[j] = re
     }
@@ -140,9 +147,10 @@ private fun compositeMarkup(
     bitmap: Bitmap, text: String, watermark: String,
     signature: List<List<Pair<Float, Float>>> = emptyList(),
     highlights: List<List<Pair<Float, Float>>> = emptyList(),
-    brushes: List<List<Pair<Float, Float>>> = emptyList()
+    brushes: List<List<Pair<Float, Float>>> = emptyList(),
+    erasures: List<List<Pair<Float, Float>>> = emptyList()
 ): Bitmap {
-    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty() && brushes.isEmpty()) return bitmap
+    if (text.isBlank() && watermark.isBlank() && signature.isEmpty() && highlights.isEmpty() && brushes.isEmpty() && erasures.isEmpty()) return bitmap
     val canvas = android.graphics.Canvas(bitmap)
     val w = bitmap.width.toFloat()
     val h = bitmap.height.toFloat()
@@ -180,6 +188,25 @@ private fun compositeMarkup(
                 strokeJoin = android.graphics.Paint.Join.ROUND
             }
             canvas.drawPath(path, brushPaint)
+        }
+    }
+    // Manual whiteout strokes: works offline and is included in previews and export.
+    erasures.forEach { stroke ->
+        if (stroke.size > 1) {
+            val path = android.graphics.Path()
+            stroke.forEachIndexed { index, point ->
+                val x = point.first.coerceIn(0f, 1f) * w
+                val y = point.second.coerceIn(0f, 1f) * h
+                if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val erasePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.WHITE
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = (w * 0.035f).coerceIn(24f, 68f)
+                strokeCap = android.graphics.Paint.Cap.ROUND
+                strokeJoin = android.graphics.Paint.Join.ROUND
+            }
+            canvas.drawPath(path, erasePaint)
         }
     }
     if (watermark.isNotBlank()) {
@@ -261,6 +288,107 @@ private fun PageThumb(uri: Uri, rot: Int, selected: Boolean, label: String, onCl
     }
 }
 
+
+@Composable
+private fun FilterEditPanel(
+    page: Uri,
+    rotation: Int,
+    selected: PageFilter,
+    compareOriginal: Boolean,
+    applyAll: Boolean,
+    onApplyAllChanged: (Boolean) -> Unit,
+    onCompare: () -> Unit,
+    onSelect: (PageFilter) -> Unit,
+    onCancel: () -> Unit,
+    onApply: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val previewState by produceState<Result<Bitmap>?>(null, page, rotation, selected, compareOriginal) {
+        value = null
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                ImageFilters.apply(
+                    ImageFilters.rotate(ImageFilters.load(ctx, page, 1000), rotation),
+                    if (compareOriginal) PageFilter.ORIGINAL else selected
+                )
+            }
+        }
+    }
+    val preview = previewState?.getOrNull()
+    val thumbnails by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rotation) {
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                PageFilter.values().associateWith { filter ->
+                    ImageFilters.apply(
+                        ImageFilters.rotate(ImageFilters.load(ctx, page, 140), rotation),
+                        filter
+                    )
+                }
+            }.getOrDefault(emptyMap())
+        }
+    }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Cancel filter") }
+                Text("Filter", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                TextButton(onCompare) { Text(if (compareOriginal) "Show Filter" else "Compare") }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                when {
+                    preview != null -> Image(preview.asImageBitmap(), "Filtered document preview", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    previewState == null -> CircularProgressIndicator()
+                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Preview failed to load.")
+                        TextButton(onClick = onCancel) { Text("Close") }
+                    }
+                }
+                TextButton(onClick = onCompare, Modifier.align(Alignment.BottomEnd)) { Text("Compare") }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Same filter for all pages", Modifier.weight(1f), color = MaterialTheme.colorScheme.onBackground)
+                Switch(checked = applyAll, onCheckedChange = onApplyAllChanged)
+            }
+            LazyRow(
+                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                items(PageFilter.values().toList()) { filter ->
+                    val active = filter == selected
+                    Column(
+                        Modifier.width(84.dp).clickable { onSelect(filter) },
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            Modifier.size(80.dp, 100.dp).clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .then(if (active) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)
+                        ) {
+                            thumbnails[filter]?.let {
+                                Image(it.asImageBitmap(), filter.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                        }
+                        Text(filter.label, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onCancel) { Icon(Icons.Filled.ArrowBack, "Cancel filter") }
+                Spacer(Modifier.weight(1f))
+                Text("Filter", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                IconButton(onApply) { Icon(Icons.Filled.Check, "Apply filter", tint = MaterialTheme.colorScheme.primary) }
+            }
+        }
+    }
+}
+
 @Composable
 fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: SnackbarHostState, scope: CoroutineScope,
                      onBack: () -> Unit, onSaved: () -> Unit, onExtract: () -> Unit, onAddCamera: () -> Unit,
@@ -271,12 +399,15 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     var applyAll by remember { mutableStateOf(true) }
     var compareOriginal by remember { mutableStateOf(false) }
     var editorTab by remember { mutableStateOf("Images") }
+    var showFilterPanel by remember { mutableStateOf(false) }
+    var filterPanelOriginals by remember { mutableStateOf<Map<Int, PageFilter>>(emptyMap()) }
     var showTextDialog by remember { mutableStateOf(false) }
     var showWatermarkDialog by remember { mutableStateOf(false) }
     var showSignatureDialog by remember { mutableStateOf(false) }
     var signatureDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
     var activeSignature by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
     var showHighlightDialog by remember { mutableStateOf(false) }
+    var showEraseDialog by remember { mutableStateOf(false) }
     var drawingMode by remember { mutableStateOf("Highlight") }
     var highlightDraft by remember { mutableStateOf(emptyList<List<Pair<Float, Float>>>()) }
     var activeHighlight by remember { mutableStateOf(emptyList<Pair<Float, Float>>()) }
@@ -308,23 +439,25 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickG = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us -> if (us.isNotEmpty()) addProcessed(us) }
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
-    val preview by produceState<Bitmap?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
-        // Clear the state first; DisposableEffect releases the prior image after Compose stops drawing it.
+    var previewRetry by remember { mutableIntStateOf(0) }
+    val previewState by produceState<Result<Bitmap>?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur], previewRetry) {
+        // Keep loading and failure separate so a failed filter never leaves an endless spinner.
         value = null
         value = withContext(Dispatchers.Default) {
             runCatching {
                 compositeMarkup(
-                    ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
+                    ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 900), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
                     if (compareOriginal) "" else r.textOverlays[cur],
                     if (compareOriginal) "" else r.watermarks[cur],
                     if (compareOriginal) emptyList() else r.signatures[cur],
                     if (compareOriginal) emptyList() else r.highlights[cur],
-                    if (compareOriginal) emptyList() else r.brushes[cur]
+                    if (compareOriginal) emptyList() else r.brushes[cur], r.erasures[cur]
                 )
-            }.getOrNull()
+            }
         }
     }
-    val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
+    val preview = previewState?.getOrNull()
+    val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur]) {
         value = emptyMap()
         value = withContext(Dispatchers.Default) {
             runCatching {
@@ -333,7 +466,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     PageFilter.values().associateWith { f ->
                         compositeMarkup(
                             ImageFilters.apply(base.copy(Bitmap.Config.ARGB_8888, false)!!, f),
-                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]
+                            r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], r.erasures[cur]
                         )
                     }
                 } finally {
@@ -358,7 +491,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 runCatching {
                     fun bmp(i: Int) = compositeMarkup(
                         ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1500), ro[i]), fl[i]),
-                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
+                        r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i], r.erasures[i]
                     )
                     val saved = when (mode) {
                         0 -> store.bitmapsToPdf(pages.size, name) { bmp(it) }
@@ -381,6 +514,44 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
 
+    fun shareCurrentPdf() {
+        val pages = r.pages.toList()
+        val filters = r.filters.toList()
+        val rotations = r.rots.toList()
+        val texts = r.textOverlays.toList()
+        val watermarks = r.watermarks.toList()
+        val signatures = r.signatures.toList()
+        val highlights = r.highlights.toList()
+        val brushes = r.brushes.toList()
+        val erasures = r.erasures.toList()
+        val name = r.title
+        scope.launch {
+            saving = true
+            val file = withContext(Dispatchers.IO) {
+                runCatching {
+                    store.bitmapsToPdf(pages.size, name) { i ->
+                        compositeMarkup(
+                            ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 1200), rotations[i]), filters[i]),
+                            texts[i], watermarks[i], signatures[i], highlights[i], brushes[i], erasures[i]
+                        )
+                    }
+                }.getOrNull()
+            }
+            saving = false
+            if (file == null) {
+                snack.showSnackbar("Could not prepare PDF for sharing.")
+            } else {
+                val uri = store.uri(file)
+                val intent = Intent(Intent.ACTION_SEND)
+                    .setType("application/pdf")
+                    .putExtra(Intent.EXTRA_STREAM, uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                runCatching { ctx.startActivity(Intent.createChooser(intent, "Share PDF")) }
+                    .onFailure { snack.showSnackbar("Could not open sharing options.") }
+            }
+        }
+    }
+
     fun saveToGallery() {
         val pages = r.pages.toList(); val fl = r.filters.toList(); val ro = r.rots.toList()
         val name = r.title.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "Scan" }
@@ -394,7 +565,7 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     val ok = runCatching {
                         val b = compositeMarkup(
                             ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, pages[i], 2000), ro[i]), fl[i]),
-                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i]
+                            r.textOverlays[i], r.watermarks[i], r.signatures[i], r.highlights[i], r.brushes[i], r.erasures[i]
                         )
                         val res = Export.saveImage(ctx, b, "${name}_${i + 1}", png)
                         b.recycle(); res
@@ -408,6 +579,35 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
         }
     }
 
+    if (showFilterPanel) {
+        FilterEditPanel(
+            page = page,
+            rotation = rot,
+            selected = flt,
+            compareOriginal = compareOriginal,
+            applyAll = applyAll,
+            onApplyAllChanged = { next ->
+                if (next && !applyAll) {
+                    val missing = r.filters.indices.filterNot { it in filterPanelOriginals }
+                    filterPanelOriginals = filterPanelOriginals + missing.associateWith { r.filters[it] }
+                    missing.forEach { r.pushUndo(it) }
+                }
+                applyAll = next
+            },
+            onCompare = { compareOriginal = !compareOriginal },            onSelect = { f ->
+                compareOriginal = false
+                if (applyAll) r.filters.indices.forEach { r.filters[it] = f } else r.filters[cur] = f
+            },
+            onCancel = {
+                filterPanelOriginals.keys.forEach { i -> if (r.canUndo(i)) r.undo(i) }
+                compareOriginal = false
+                showFilterPanel = false
+            },
+            onApply = { compareOriginal = false; showFilterPanel = false }
+        )
+        return
+    }
+
     Scaffold(containerColor = MaterialTheme.colorScheme.background, snackbarHost = { SnackbarHost(snack) }) { pad ->
         Column(Modifier.padding(pad)) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -415,7 +615,9 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                 BasicTextField(r.title, { r.title = it }, Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
                     .background(Color(0x22FFFFFF)).padding(horizontal = 12.dp, vertical = 10.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 17.sp), singleLine = true, cursorBrush = SolidColor(MaterialTheme.colorScheme.primary))
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(6.dp))
+                TextButton(onClick = { shareCurrentPdf() }, enabled = !saving) { Text("Share") }
+                Spacer(Modifier.width(4.dp))
                 Button({ fDialog = true }, enabled = !saving, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)) {
                     Text(if (saving) "Working…" else "Finish")
                 }
@@ -428,58 +630,16 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
                 val p = preview
-                if (p == null) CircularProgressIndicator(color = Cyan)
-                else Image(p.asImageBitmap(), "Page ${cur + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                when {
+                    p != null -> Image(p.asImageBitmap(), "Page ${cur + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    previewState == null -> CircularProgressIndicator(color = Cyan)
+                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Preview could not be loaded. Try again or choose another filter.", color = MaterialTheme.colorScheme.onBackground)
+                        TextButton(onClick = { previewRetry++ }) { Text("Retry") }
+                    }
+                }
                 IconButton({ r.remove(cur); idx = 0 }, Modifier.align(Alignment.TopStart).clip(CircleShape).background(Color(0x66000000))) {
                     Icon(Icons.Filled.Delete, "Delete page", tint = Color.White)
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = MaterialTheme.colorScheme.primary) }
-                Spacer(Modifier.weight(1f))
-                Text("Page ${cur + 1} of ${r.pages.size}", color = MaterialTheme.colorScheme.onBackground)
-                Spacer(Modifier.weight(1f))
-                TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = MaterialTheme.colorScheme.primary) }
-            }
-            LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Same filter for all pages", color = MaterialTheme.colorScheme.onBackground, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Switch(applyAll, { applyAll = it })
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { compareOriginal = !compareOriginal }) {
-                    Text(if (compareOriginal) "Show Filter" else "Compare", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = { r.undo(cur); compareOriginal = false }, enabled = r.canUndo(cur)) {
-                    Text("Undo", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = { r.redo(cur); compareOriginal = false }, enabled = r.canRedo(cur)) {
-                    Text("Redo", color = MaterialTheme.colorScheme.primary)
-                }
-                TextButton(onClick = {
-                    r.pushUndo(cur)
-                    r.filters[cur] = PageFilter.ORIGINAL
-                    r.rots[cur] = 0
-                    compareOriginal = false
-                }) { Text("Reset", color = MaterialTheme.colorScheme.primary) }
-            }
-            LazyRow(Modifier.padding(vertical = 6.dp), contentPadding = PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(PageFilter.values().toList()) { f ->
-                    val sel = f == flt
-                    Column(Modifier.clickable {
-                        if (applyAll) {
-                            for (i in r.filters.indices) if (r.filters[i] != f) { r.pushUndo(i); r.filters[i] = f }
-                        } else if (r.filters[cur] != f) { r.pushUndo(cur); r.filters[cur] = f }
-                    }, horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(Modifier.size(64.dp, 84.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF164532))
-                            .then(if (sel) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)) {
-                            thumbs[f]?.let { Image(it.asImageBitmap(), f.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                        }
-                        Text(f.label, color = if (sel) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
-                    }
                 }
             }
             Row(
@@ -494,14 +654,27 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                     )
                 }
             }
+            if (editorTab == "Page") {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    TextButton({ if (cur > 0) { r.move(cur, -1); idx = cur - 1 } }) { Text("◀ Move", color = MaterialTheme.colorScheme.primary) }
+                    Spacer(Modifier.weight(1f))
+                    Text("Page ${cur + 1} of ${r.pages.size}", color = MaterialTheme.colorScheme.onBackground)
+                    Spacer(Modifier.weight(1f))
+                    TextButton({ if (cur < r.pages.size - 1) { r.move(cur, 1); idx = cur + 1 } }) { Text("Move ▶", color = MaterialTheme.colorScheme.primary) }
+                }
+                LazyRow(Modifier.padding(vertical = 4.dp), contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    itemsIndexed(r.pages.toList()) { i, u -> PageThumb(u, r.rots[i], i == cur, "${i + 1}") { idx = i } }
+                }
+            }
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 when (editorTab) {
                     "Images" -> {
                         BarButton(Icons.Filled.CameraAlt, "Retake") { onRetake(cur) }
+                        BarButton(Icons.Filled.Image, "CS PDF") { fMode = 0; fDialog = true }
                         Box {
                             BarButton(Icons.Filled.Add, "Add") { addMenu = true }
                             DropdownMenu(addMenu, { addMenu = false }) {
@@ -511,14 +684,37 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
                             }
                         }
                         BarButton(Icons.Filled.Crop, "Crop") { onCrop(cur) }
+                        BarButton(Icons.Filled.Image, "Filter") {
+                            val targets = if (applyAll) r.filters.indices.toList() else listOf(cur)
+                            filterPanelOriginals = targets.associateWith { r.filters[it] }
+                            targets.forEach { r.pushUndo(it) }
+                            compareOriginal = false
+                            showFilterPanel = true
+                        }
                         BarButton(Icons.Filled.RotateLeft, "Rotate") { r.pushUndo(cur); r.rots[cur] = (rot + 270) % 360 }
                         BarButton(Icons.Filled.Image, "Reset") {
                             r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL
                             r.rots[cur] = 0; compareOriginal = false
                         }
+                        BarButton(Icons.Filled.Edit, "Edit Text") {
+                            textDraft = r.textOverlays[cur]; showTextDialog = true
+                        }
+                        BarButton(Icons.Filled.Delete, "Smart Erase") {
+                            activeHighlight = emptyList()
+                            highlightDraft = r.erasures[cur]
+                            showEraseDialog = true
+                        }
+                        BarButton(Icons.Filled.ArrowBack, "Undo") { r.undo(cur); compareOriginal = false }
+                        BarButton(Icons.Filled.ArrowForward, "Redo") { r.redo(cur); compareOriginal = false }
+                        BarButton(Icons.Filled.Image, "Reset") {
+                            r.pushUndo(cur); r.filters[cur] = PageFilter.ORIGINAL; r.rots[cur] = 0
+                            r.textOverlays[cur] = ""; r.watermarks[cur] = ""; r.signatures[cur] = emptyList()
+                            r.highlights[cur] = emptyList(); r.brushes[cur] = emptyList(); r.erasures[cur] = emptyList()
+                            compareOriginal = false
+                        }
                     }
                     "Markup" -> {
-                        BarButton(Icons.Filled.TextFields, "Add Text") {
+                        BarButton(Icons.Filled.TextFields, "Edit Text") {
                             textDraft = r.textOverlays[cur]; showTextDialog = true
                         }
                         BarButton(Icons.Filled.Edit, "Signature") {
@@ -622,6 +818,65 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             showWatermarkDialog = false
         }) { Text("Apply") } },
         dismissButton = { TextButton({ showWatermarkDialog = false }) { Text("Cancel") } }
+    )
+    if (showEraseDialog) AlertDialog(
+        onDismissRequest = { showEraseDialog = false },
+        title = { Text("Smart Erase") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Draw over content to cover it with white. This works offline; it hides marks rather than reconstructing the background.")
+                Box(Modifier.fillMaxWidth().height(220.dp).clip(RoundedCornerShape(8.dp))) {
+                    preview?.let {
+                        Image(it.asImageBitmap(), "Document to erase", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    } ?: Box(Modifier.fillMaxSize().background(Color.White))
+                    androidx.compose.foundation.Canvas(
+                        Modifier.fillMaxSize().pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { p ->
+                                    activeHighlight = listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    val p = change.position
+                                    activeHighlight = liveActiveHighlight + listOf(
+                                        (p.x / size.width).coerceIn(0f, 1f) to (p.y / size.height).coerceIn(0f, 1f)
+                                    )
+                                },
+                                onDragEnd = {
+                                    val stroke = liveActiveHighlight
+                                    if (stroke.size > 1) highlightDraft = liveHighlightDraft + listOf(stroke)
+                                    activeHighlight = emptyList()
+                                }
+                            )
+                        }
+                    ) {
+                        (highlightDraft + listOf(activeHighlight)).forEach { stroke ->
+                            if (stroke.size > 1) {
+                                val path = androidx.compose.ui.graphics.Path()
+                                stroke.forEachIndexed { i, p ->
+                                    val x = p.first * size.width; val y = p.second * size.height
+                                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                                }
+                                drawPath(path, Color(0xAAFFFFFF), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 30.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                                drawPath(path, Color(0xFF808080), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                            }
+                        }
+                    }
+                }
+                TextButton(onClick = { highlightDraft = emptyList(); activeHighlight = emptyList() }) { Text("Clear") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                r.pushUndo(cur)
+                r.erasures[cur] = highlightDraft + listOf(activeHighlight).filter { it.size > 1 }
+                activeHighlight = emptyList()
+                showEraseDialog = false
+            }) { Text("Apply") }
+        },
+        dismissButton = { TextButton(onClick = { showEraseDialog = false; activeHighlight = emptyList() }) { Text("Cancel") } }
     )
     if (showHighlightDialog) AlertDialog(
         onDismissRequest = { showHighlightDialog = false },
