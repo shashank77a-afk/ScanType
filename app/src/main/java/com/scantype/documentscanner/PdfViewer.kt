@@ -14,6 +14,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Print
@@ -73,9 +75,17 @@ fun PdfViewerScreen(
     onOpenExternal: () -> Unit,
     onShare: () -> Unit,
     onPrint: () -> Unit,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    onAddPages: () -> Unit,
+    onRename: (String) -> Unit,
+    onCheckErrors: () -> Unit
 ) {
     var page by remember(file.path, file.lastModified()) { mutableIntStateOf(0) }
+    var nameDialog by remember(file.path) { mutableStateOf(false) }
+    var newName by remember(file.path) { mutableStateOf(file.nameWithoutExtension) }
+    var moreMenu by remember { mutableStateOf(false) }
+    var tagsDialog by remember { mutableStateOf(false) }
+    var tags by remember(file.path) { mutableStateOf("") }
     val count by produceState(0, file.path, file.lastModified()) {
         value = withContext(Dispatchers.IO) {
             runCatching { PdfRenderer(ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)).use { it.pageCount } }
@@ -95,10 +105,28 @@ fun PdfViewerScreen(
                 },
                 navigationIcon = { IconButton(onBack) { Icon(Icons.Filled.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onShare) { Icon(Icons.Filled.Share, "Share PDF") }
-                    IconButton(onPrint) { Icon(Icons.Filled.Print, "Print PDF") }
-                    IconButton(onSave) { Icon(Icons.Filled.SaveAlt, "Save to Downloads") }
-                    IconButton(onEditPages) { Icon(Icons.Filled.Edit, "Edit PDF") }
+                    IconButton(onClick = { nameDialog = true }) { Icon(Icons.Filled.Edit, "Rename document") }
+                    Box {
+                        IconButton(onClick = { tagsDialog = true }) { Icon(Icons.Filled.Label, "Tags") }
+                    }
+                    IconButton(onSave) { Icon(Icons.Filled.Save, "Save") }
+                    Box {
+                        IconButton(onClick = { moreMenu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                        DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Rename") },
+                                onClick = { moreMenu = false; nameDialog = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Tags") },
+                                onClick = { moreMenu = false; tagsDialog = true }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Print") },
+                                onClick = { moreMenu = false; onPrint() }
+                            )
+                        }
+                    }
                 }
             )
         }
@@ -146,8 +174,70 @@ fun PdfViewerScreen(
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = onOpenExternal, modifier = Modifier.fillMaxWidth()) { Text("Open in another app") }
+                Card(
+                    onClick = onCheckErrors,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.AutoAwesome, "Document check", tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Check for document errors", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Filled.Send, "Check", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().padding(top = 4.dp, bottom = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(onAddPages, Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Add, null); Spacer(Modifier.width(5.dp)); Text("Add", maxLines = 1)
+                    }
+                    Button(onEditPages, Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Edit, null); Spacer(Modifier.width(5.dp)); Text("Edit", maxLines = 1)
+                    }
+                    OutlinedButton(onShare, Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Share, null); Spacer(Modifier.width(5.dp)); Text("Share", maxLines = 1)
+                    }
+                }
             }
         }
+
+    if (nameDialog) AlertDialog(
+        onDismissRequest = { nameDialog = false },
+        title = { Text("Rename document") },
+        text = {
+            OutlinedTextField(
+                value = newName,
+                onValueChange = { newName = it },
+                singleLine = true,
+                label = { Text("Document name") }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val name = newName.trim()
+                if (name.isNotBlank()) onRename(name)
+                nameDialog = false
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { nameDialog = false }) { Text("Cancel") } }
+    )
+    if (tagsDialog) AlertDialog(
+        onDismissRequest = { tagsDialog = false },
+        title = { Text("Document tags") },
+        text = {
+            OutlinedTextField(
+                value = tags,
+                onValueChange = { tags = it },
+                label = { Text("Tags (comma-separated)") },
+                placeholder = { Text("School, Personal, Office") }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { tagsDialog = false }) { Text("Done") }
+        }
+    )
     }
 }
