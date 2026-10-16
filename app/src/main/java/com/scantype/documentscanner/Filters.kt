@@ -9,7 +9,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 enum class PageFilter(val label: String) {
-    ORIGINAL("Original"), ENHANCE("Enhance"), NO_SHADOW("No Shadow"), GRAY("Grayscale"), BW("B&W")
+    ORIGINAL("Original"), ENHANCE("Enhance"), LIGHTEN("Lighten"), NO_SHADOW("No Shadow"), OMNIFIX("OmniFix"), BW("B&W")
 }
 
 object ImageFilters {
@@ -53,9 +53,10 @@ object ImageFilters {
     fun apply(src: Bitmap, f: PageFilter): Bitmap {
         val out = when (f) {
             PageFilter.ORIGINAL -> return src
-            PageFilter.ENHANCE -> colorFilter(src, 1.25f, 10f, 1.1f)
-            PageFilter.GRAY -> colorFilter(src, 1.15f, 5f, 0f)
+            PageFilter.ENHANCE -> colorFilter(src, 1.28f, 9f, 1.0f)
+            PageFilter.LIGHTEN -> colorFilter(src, 1.08f, 24f, 1.0f)
             PageFilter.NO_SHADOW -> normalize(src, false)
+            PageFilter.OMNIFIX -> normalize(src, false)
             PageFilter.BW -> normalize(src, true)
         }
         if (out !== src) src.recycle()
