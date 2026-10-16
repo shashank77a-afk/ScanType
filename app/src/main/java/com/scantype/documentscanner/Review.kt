@@ -308,22 +308,24 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
     val pickG = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us -> if (us.isNotEmpty()) addProcessed(us) }
     val pickF = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us -> if (us.isNotEmpty()) addProcessed(us) }
 
-    val preview by produceState<Bitmap?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
-        // Clear the state first; DisposableEffect releases the prior image after Compose stops drawing it.
+    var previewRetry by remember { mutableIntStateOf(0) }
+    val previewState by produceState<Result<Bitmap>?>(null, page, flt, rot, compareOriginal, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur], previewRetry) {
+        // Keep loading and failure separate so a failed filter never leaves an endless spinner.
         value = null
         value = withContext(Dispatchers.Default) {
             runCatching {
                 compositeMarkup(
-                    ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 1200), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
+                    ImageFilters.apply(ImageFilters.rotate(ImageFilters.load(ctx, page, 900), rot), if (compareOriginal) PageFilter.ORIGINAL else flt),
                     if (compareOriginal) "" else r.textOverlays[cur],
                     if (compareOriginal) "" else r.watermarks[cur],
                     if (compareOriginal) emptyList() else r.signatures[cur],
                     if (compareOriginal) emptyList() else r.highlights[cur],
                     if (compareOriginal) emptyList() else r.brushes[cur]
                 )
-            }.getOrNull()
+            }
         }
     }
+    val preview = previewState?.getOrNull()
     val thumbs by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rot, r.textOverlays[cur], r.watermarks[cur], r.signatures[cur], r.highlights[cur], r.brushes[cur]) {
         value = emptyMap()
         value = withContext(Dispatchers.Default) {
@@ -428,8 +430,14 @@ fun ScanReviewScreen(r: ReviewState, store: DocStore, prefs: Prefs, snack: Snack
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(12.dp), contentAlignment = Alignment.Center) {
                 val p = preview
-                if (p == null) CircularProgressIndicator(color = Cyan)
-                else Image(p.asImageBitmap(), "Page ${cur + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                when {
+                    p != null -> Image(p.asImageBitmap(), "Page ${cur + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    previewState == null -> CircularProgressIndicator(color = Cyan)
+                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Preview could not be loaded. Try again or choose another filter.", color = MaterialTheme.colorScheme.onBackground)
+                        TextButton(onClick = { previewRetry++ }) { Text("Retry") }
+                    }
+                }
                 IconButton({ r.remove(cur); idx = 0 }, Modifier.align(Alignment.TopStart).clip(CircleShape).background(Color(0x66000000))) {
                     Icon(Icons.Filled.Delete, "Delete page", tint = Color.White)
                 }
