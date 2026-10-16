@@ -313,7 +313,7 @@ fun App(prefs: Prefs) {
     if (rv != null && ci != null && ci < rv.pages.size) {
         BackHandler { cropIdx = null }
         CropScreen(rv.pages[ci], rv.rots[ci], "Crop page ${ci + 1}",
-            onDone = { u -> rv.pages[ci] = u; rv.rots[ci] = 0; cropIdx = null },
+            onDone = { u -> rv.setCroppedPage(ci, u); cropIdx = null },
             onCancel = { cropIdx = null })
         return
     }
