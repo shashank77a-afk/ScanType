@@ -25,10 +25,12 @@ class DocStore(private val ctx: Context) {
         dir.walkTopDown().maxDepth(2).filter { it.isFile && it.extension == "pdf" }
             .sortedByDescending { it.lastModified() }.toList()
 
-    private fun newFile(prefix: String): File {
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        // Several exports can complete within one second; never truncate an existing PDF.
-        return unique("${prefix}_$ts")
+    private fun newFile(@Suppress("UNUSED_PARAMETER") prefix: String): File {
+        // Use the same human-readable default name as the scan review screen.
+        // Keep the time to minutes to match the requested ScannerAi dd-MM-yyyy HH.mm format.
+        val ts = SimpleDateFormat("dd-MM-yyyy HH.mm", Locale.US).format(Date())
+        // Multiple exports in the same minute receive a suffix instead of overwriting.
+        return unique("ScannerAi $ts")
     }
     private fun clean(s: String) = s.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim()
     private fun unique(base: String): File {
