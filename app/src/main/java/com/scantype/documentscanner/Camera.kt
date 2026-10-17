@@ -221,24 +221,31 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     .addOnCompleteListener { proxy.close() }
             } else if (m == CamMode.DOCS || m == CamMode.ID || m == CamMode.BOOK) {
                 try {
-                    val plane = proxy.planes[0]; val buf = plane.buffer; val rs = plane.rowStride
-                    val w = proxy.width; val h = proxy.height
-                    val step = max(1, max(w, h) / 240)
-                    val sw = w / step; val sh = h / step
+                    val plane = proxy.planes[0]
+                    val buf = plane.buffer
+                    val rs = plane.rowStride
+                    val ps = plane.pixelStride.coerceAtLeast(1)
+                    val w = proxy.width
+                    val h = proxy.height
+                    // Ceiling division guarantees that the longest analysis side never exceeds ~240 px.
+                    val step = max(1, (max(w, h) + 239) / 240)
+                    val sw = max(1, w / step)
+                    val sh = max(1, h / step)
                     val g = IntArray(sw * sh)
                     var brightnessTotal = 0L
                     for (y in 0 until sh) {
                         val row = y * step * rs
                         for (x in 0 until sw) {
-                            val v = buf.get(row + x * step).toInt() and 0xFF
+                            val index = row + x * step * ps
+                            val v = if (index in 0 until buf.limit()) buf.get(index).toInt() and 0xFF else 0
                             g[y * sw + x] = v
                             brightnessTotal += v
                         }
                     }
+                    val meanBrightness = brightnessTotal.toDouble() / g.size
                     // Update the warning occasionally, not on every camera frame, to avoid UI churn.
                     if (now - hintTick[0] > 1800L) {
                         hintTick[0] = now
-                        val meanBrightness = brightnessTotal.toDouble() / g.size
                         liveHint = when {
                             meanBrightness < 48 -> "Low light — turn on a light or use flash."
                             meanBrightness > 244 -> "Too much glare — tilt the page or reduce the light."
@@ -247,7 +254,8 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     }
                     val (rg, rw, rh) = EdgeDetect.rotate(g, sw, sh, proxy.imageInfo.rotationDegrees)
                     frameAr = rw.toFloat() / rh
-                    val detected = EdgeDetect.detect(rg, rw, rh)
+                    val detection = EdgeDetect.detectDetailed(rg, rw, rh)
+                    val detected = detection?.corners
                     val previousOverlay = hist[0]
                     val previousDetection = rawHist[0]
                     // Smooth every valid move, not just small moves, so the overlay catches up
@@ -261,8 +269,17 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     else stable[0] = 0
                     hist[0] = q?.copyOf()
                     rawHist[0] = detected?.copyOf()
-                    if (autoNow && detected != null && stable[0] >= 6 &&
-                        EdgeDetect.area(detected) > 0.20f && !busyNow && now > cooldown[0]) {
+                    val minimumAutoArea = when (m) {
+                        CamMode.ID -> 0.06f
+                        CamMode.BOOK -> 0.15f
+                        else -> 0.18f
+                    }
+                    // Only auto-capture a sufficiently supported detection in usable exposure.
+                    val exposureUsable = meanBrightness in 38.0..246.0
+                    if (autoNow && detected != null && detection != null &&
+                        detection.confidence >= 0.22f && detection.edgeSupport >= 0.10f &&
+                        stable[0] >= 5 && EdgeDetect.area(detected) > minimumAutoArea &&
+                        exposureUsable && !busyNow && now > cooldown[0]) {
                         stable[0] = 0; autoTrigger = true
                     }
                 } finally { proxy.close() }
