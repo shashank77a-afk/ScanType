@@ -61,18 +61,22 @@ import kotlin.math.abs
 import kotlin.math.max
 
 private fun livePreviewMatrix(filter: PageFilter): ColorMatrix {
+    // Live view is intentionally a fast visual approximation. The full-resolution
+    // filter is run after capture and is authoritative for the saved document.
     val sat = when (filter) {
-        PageFilter.BW -> 0f
-        PageFilter.OMNIFIX -> 0.92f
+        PageFilter.BW, PageFilter.GREY -> 0f
+        PageFilter.MAGIC_COLOR -> 1.12f
         else -> 1f
     }
     val (contrast, brightness) = when (filter) {
         PageFilter.ORIGINAL -> 1f to 0f
-        PageFilter.ENHANCE -> 1.22f to 8f
-        PageFilter.LIGHTEN -> 1.05f to 22f
-        PageFilter.NO_SHADOW -> 1.12f to 18f
-        PageFilter.OMNIFIX -> 1.14f to 7f
-        PageFilter.BW -> 1.32f to 4f
+        PageFilter.ENHANCE -> 1.12f to 4f
+        PageFilter.MAGIC_COLOR -> 1.06f to 6f
+        PageFilter.LIGHTEN -> 1.00f to 17f
+        PageFilter.BW -> 1.42f to 8f
+        PageFilter.GREY -> 1.05f to 2f
+        // A color matrix cannot sharpen edges; use a subtle clarity cue in preview.
+        PageFilter.SHARPEN -> 1.05f to 0f
     }
     val matrix = ColorMatrix().apply { setSaturation(sat) }
     val shift = (0.5f - 0.5f * contrast) * 255f + brightness
@@ -165,10 +169,15 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val stable = remember { IntArray(1) }
     val cooldown = remember { LongArray(1) }
     val hintTick = remember { LongArray(1) }
+    // Keep a smoothed overlay history separate from raw detections used by auto-capture stability.
     val hist = remember { arrayOfNulls<FloatArray>(1) }
+    val rawHist = remember { arrayOfNulls<FloatArray>(1) }
 
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
-    LaunchedEffect(mode) { shots.clear(); quad = null; qr = null }
+    LaunchedEffect(mode) {
+        shots.clear(); quad = null; qr = null
+        hist[0] = null; rawHist[0] = null; stable[0] = 0
+    }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
         if (us.isNotEmpty()) onDone(us, mode, liveFilter)
     }
@@ -238,12 +247,22 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     }
                     val (rg, rw, rh) = EdgeDetect.rotate(g, sw, sh, proxy.imageInfo.rotationDegrees)
                     frameAr = rw.toFloat() / rh
-                    val q = EdgeDetect.detect(rg, rw, rh)
+                    val detected = EdgeDetect.detect(rg, rw, rh)
+                    val previousOverlay = hist[0]
+                    val previousDetection = rawHist[0]
+                    // Smooth every valid move, not just small moves, so the overlay catches up
+                    // to a moving page across frames instead of jumping on a single frame.
+                    val q = if (detected != null && previousOverlay != null) {
+                        FloatArray(8) { i -> previousOverlay[i] * 0.70f + detected[i] * 0.30f }
+                    } else detected
                     quad = q
-                    val prev = hist[0]
-                    if (q != null && prev != null && (0 until 8).all { abs(q[it] - prev[it]) < 0.025f }) stable[0]++ else stable[0] = 0
-                    hist[0] = q
-                    if (autoNow && q != null && stable[0] >= 6 && EdgeDetect.area(q) > 0.2f && !busyNow && now > cooldown[0]) {
+                    if (detected != null && previousDetection != null &&
+                        (0 until 8).all { abs(detected[it] - previousDetection[it]) < 0.025f }) stable[0]++
+                    else stable[0] = 0
+                    hist[0] = q?.copyOf()
+                    rawHist[0] = detected?.copyOf()
+                    if (autoNow && detected != null && stable[0] >= 6 &&
+                        EdgeDetect.area(detected) > 0.20f && !busyNow && now > cooldown[0]) {
                         stable[0] = 0; autoTrigger = true
                     }
                 } finally { proxy.close() }

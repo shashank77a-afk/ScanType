@@ -74,6 +74,24 @@ object EdgeDetect {
             val j = (i + 1) % 4
             if (abs(out[i * 2] - out[j * 2]) + abs(out[i * 2 + 1] - out[j * 2 + 1]) < 0.15f) return null
         }
+        // All four turns must have the same orientation. This rejects crossed, folded,
+        // or duplicate-corner quads before they can cause a bad perspective warp.
+        var sign = 0
+        for (i in 0 until 4) {
+            val j = (i + 1) % 4
+            val k = (i + 2) % 4
+            val abx = out[j * 2] - out[i * 2]
+            val aby = out[j * 2 + 1] - out[i * 2 + 1]
+            val bcx = out[k * 2] - out[j * 2]
+            val bcy = out[k * 2 + 1] - out[j * 2 + 1]
+            val cross = abx * bcy - aby * bcx
+            if (abs(cross) < 0.0005f) return null
+            val currentSign = if (cross > 0f) 1 else -1
+            if (sign != 0 && currentSign != sign) return null
+            sign = currentSign
+        }
+        // Refuse nearly collapsed quadrilaterals even if the connected component was large.
+        if (quad / total < 0.12f || quad / total > 0.97f) return null
         out[8] = quad / total
         return out
     }
