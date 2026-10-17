@@ -142,12 +142,12 @@ object EdgeDetect {
     }
 
     /** Finds the document corners (TL, TR, BR, BL) as 8 values in 0..1, or null when nothing reliable is found. */
-    fun detect(gray: IntArray, w: Int, h: Int): FloatArray? {
-        if (w < 40 || h < 40) return null
-        val b = boxBlur(boxBlur(gray, w, h), w, h)
-        val inv = IntArray(b.size) { 255 - b[it] }
-        val cands = listOfNotNull(bright(b, w, h), edges(b, w, h), bright(inv, w, h))
-        return cands.maxByOrNull { it[8] }?.copyOf(8)
+    fun detect(gray: IntArray, w: Int, h: Int): FloatArray? =
+        detectDetailed(gray, w, h)?.corners
+
+    internal fun detectDetailed(gray: IntArray, w: Int, h: Int): CustomDocumentDetector.Detection? {
+        if (w < 40 || h < 40 || gray.size < w * h) return null
+        return CustomDocumentDetector.detectDetailed(gray, w, h)
     }
 
     fun area(q: FloatArray): Float {
