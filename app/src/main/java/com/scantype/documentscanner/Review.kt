@@ -303,33 +303,59 @@ private fun FilterEditPanel(
     onApply: () -> Unit
 ) {
     val ctx = LocalContext.current
-    val previewState by produceState<Result<Bitmap>?>(null, page, rotation, selected, compareOriginal) {
+    var retryPreview by remember { mutableIntStateOf(0) }
+
+    // Keep only the active preview in state. produceState cancels stale work when
+    // the page/filter changes, and a smaller bounded decode prevents huge temporary bitmaps.
+    val previewState by produceState<Result<Bitmap>?>(null, page, rotation, selected, compareOriginal, retryPreview) {
         value = null
-        value = withContext(Dispatchers.Default) {
+        value = withContext(Dispatchers.IO) {
             runCatching {
-                ImageFilters.apply(
-                    ImageFilters.rotate(ImageFilters.load(ctx, page, 1000), rotation),
-                    if (compareOriginal) PageFilter.ORIGINAL else selected
-                )
+                val source = ImageFilters.load(ctx, page, 760)
+                val rotated = if (rotation % 360 == 0) source else ImageFilters.rotate(source, rotation)
+                val filtered = try {
+                    ImageFilters.apply(rotated, if (compareOriginal) PageFilter.ORIGINAL else selected)
+                } catch (t: Throwable) {
+                    if (rotated !== source && !rotated.isRecycled) rotated.recycle()
+                    throw t
+                }
+                filtered
             }
         }
     }
     val preview = previewState?.getOrNull()
-    val thumbnails by produceState<Map<PageFilter, Bitmap>>(emptyMap(), page, rotation) {
-        value = withContext(Dispatchers.Default) {
+
+    // One small thumbnail is rendered at a time, on demand as the horizontal list
+    // becomes visible. Avoid eager full-map processing of every filter at panel entry.
+    val thumbnailState by produceState<Result<Bitmap>?>(null, page, rotation, selected, retryPreview) {
+        value = null
+        value = withContext(Dispatchers.IO) {
             runCatching {
-                PageFilter.values().associateWith { filter ->
-                    ImageFilters.apply(
-                        ImageFilters.rotate(ImageFilters.load(ctx, page, 140), rotation),
-                        filter
-                    )
+                val source = ImageFilters.load(ctx, page, 112)
+                val rotated = if (rotation % 360 == 0) source else ImageFilters.rotate(source, rotation)
+                try {
+                    ImageFilters.apply(rotated, selected)
+                } catch (t: Throwable) {
+                    if (rotated !== source && !rotated.isRecycled) rotated.recycle()
+                    throw t
                 }
-            }.getOrDefault(emptyMap())
+            }
         }
     }
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background
-    ) { padding ->
+    val thumbnail = thumbnailState?.getOrNull()
+
+    DisposableEffect(preview) {
+        onDispose {
+            preview?.let { if (!it.isRecycled) runCatching { it.recycle() } }
+        }
+    }
+    DisposableEffect(thumbnail) {
+        onDispose {
+            thumbnail?.let { if (!it.isRecycled) runCatching { it.recycle() } }
+        }
+    }
+
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -339,13 +365,17 @@ private fun FilterEditPanel(
                 Text("Filter", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 TextButton(onCompare) { Text(if (compareOriginal) "Show Filter" else "Compare") }
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
                 when {
                     preview != null -> Image(preview.asImageBitmap(), "Filtered document preview", Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                     previewState == null -> CircularProgressIndicator()
                     else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Preview failed to load.")
-                        TextButton(onClick = onCancel) { Text("Close") }
+                        TextButton(onClick = { retryPreview++ }) { Text("Retry") }
+                        TextButton(onClick = onCancel) { Text("Cancel") }
                     }
                 }
                 TextButton(onClick = onCompare, Modifier.align(Alignment.BottomEnd)) { Text("Compare") }
@@ -361,17 +391,22 @@ private fun FilterEditPanel(
             ) {
                 items(PageFilter.values().toList()) { filter ->
                     val active = filter == selected
-                    Column(
-                        Modifier.width(84.dp).clickable { onSelect(filter) },
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Column(Modifier.width(84.dp).clickable { onSelect(filter) }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             Modifier.size(80.dp, 100.dp).clip(RoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .then(if (active) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier)
+                                .then(if (active) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp)) else Modifier),
+                            contentAlignment = Alignment.Center
                         ) {
-                            thumbnails[filter]?.let {
-                                Image(it.asImageBitmap(), filter.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            if (active) {
+                                when {
+                                    thumbnail != null -> Image(thumbnail.asImageBitmap(), filter.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                                    thumbnailState == null -> CircularProgressIndicator()
+                                    else -> Icon(Icons.Filled.Image, filter.label)
+                                }
+                            } else {
+                                // Neutral placeholder for inactive filters; don't run six more image pipelines.
+                                Text(filter.label.take(2), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                         Text(filter.label, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
