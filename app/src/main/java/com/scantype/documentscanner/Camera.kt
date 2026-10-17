@@ -169,10 +169,15 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
     val stable = remember { IntArray(1) }
     val cooldown = remember { LongArray(1) }
     val hintTick = remember { LongArray(1) }
+    // Keep a smoothed overlay history separate from raw detections used by auto-capture stability.
     val hist = remember { arrayOfNulls<FloatArray>(1) }
+    val rawHist = remember { arrayOfNulls<FloatArray>(1) }
 
     LaunchedEffect(flash) { capture.flashMode = if (flash) ImageCapture.FLASH_MODE_ON else ImageCapture.FLASH_MODE_OFF }
-    LaunchedEffect(mode) { shots.clear(); quad = null; qr = null }
+    LaunchedEffect(mode) {
+        shots.clear(); quad = null; qr = null
+        hist[0] = null; rawHist[0] = null; stable[0] = 0
+    }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(30)) { us ->
         if (us.isNotEmpty()) onDone(us, mode, liveFilter)
     }
@@ -243,17 +248,19 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     val (rg, rw, rh) = EdgeDetect.rotate(g, sw, sh, proxy.imageInfo.rotationDegrees)
                     frameAr = rw.toFloat() / rh
                     val detected = EdgeDetect.detect(rg, rw, rh)
-                    val prev = hist[0]
-                    // Reject abrupt jumps in the live overlay; only blend geometrically valid
-                    // detections. The unsmoothed candidate still has to remain stable for capture.
-                    val q = if (detected != null && prev != null &&
-                        (0 until 8).all { abs(detected[it] - prev[it]) < 0.16f }) {
-                        FloatArray(8) { i -> prev[i] * 0.62f + detected[i] * 0.38f }
+                    val previousOverlay = hist[0]
+                    val previousDetection = rawHist[0]
+                    // Smooth every valid move, not just small moves, so the overlay catches up
+                    // to a moving page across frames instead of jumping on a single frame.
+                    val q = if (detected != null && previousOverlay != null) {
+                        FloatArray(8) { i -> previousOverlay[i] * 0.70f + detected[i] * 0.30f }
                     } else detected
                     quad = q
-                    if (detected != null && prev != null &&
-                        (0 until 8).all { abs(detected[it] - prev[it]) < 0.025f }) stable[0]++ else stable[0] = 0
-                    hist[0] = detected?.copyOf()
+                    if (detected != null && previousDetection != null &&
+                        (0 until 8).all { abs(detected[it] - previousDetection[it]) < 0.025f }) stable[0]++
+                    else stable[0] = 0
+                    hist[0] = q?.copyOf()
+                    rawHist[0] = detected?.copyOf()
                     if (autoNow && detected != null && stable[0] >= 6 &&
                         EdgeDetect.area(detected) > 0.20f && !busyNow && now > cooldown[0]) {
                         stable[0] = 0; autoTrigger = true
