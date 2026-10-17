@@ -1,0 +1,34 @@
+name: Export Edge Detection Source Bundle
+
+on:
+  push:
+    branches:
+      - utility/edge-source-bundle-export
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package the four Kotlin files
+        run: |
+          mkdir -p bundle/app/src/main/java/com/scantype/documentscanner
+          for file in EdgeDetect.kt Camera.kt CustomDocumentDetector.kt Crop.kt; do
+            cp "app/src/main/java/com/scantype/documentscanner/$file" "bundle/app/src/main/java/com/scantype/documentscanner/$file"
+          done
+          cat > bundle/README.txt <<'EOF'
+          Scanner.ai Edge Detection source files
+          Source branch: feature/scannerai-custom-edge-engine
+          These files are provided for external review and modification.
+          After an AI tool edits them, upload the modified files back to ChatGPT for review.
+          Do not copy directly into main without building and testing.
+          EOF
+          cd bundle
+          zip -r ../ScannerAI_EdgeDetection_Four_Files.zip app README.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScannerAI-EdgeDetection-Four-Files
+          path: ScannerAI_EdgeDetection_Four_Files.zip
+          if-no-files-found: error
+          retention-days: 7
