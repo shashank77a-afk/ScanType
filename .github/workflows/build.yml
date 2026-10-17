@@ -31,6 +31,9 @@ jobs:
           test -s "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
 
+      - name: Run document detection regression tests
+        run: gradle :app:testDebugUnitTest --stacktrace
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace
 
