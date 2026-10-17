@@ -72,7 +72,7 @@ object ImageFilters {
             PageFilter.MAGIC_COLOR -> normalizePaper(src, preserveColor = true, strength = 0.78f)
             PageFilter.LIGHTEN -> lighten(src)
             PageFilter.BW -> blackAndWhite(src)
-            PageFilter.GREY -> grayscale(src, normalizePaper = true)
+            PageFilter.GREY -> grayscale(src, normalize = true)
             PageFilter.SHARPEN -> sharpen(src)
         }
         if (out !== src && !src.isRecycled) src.recycle()
