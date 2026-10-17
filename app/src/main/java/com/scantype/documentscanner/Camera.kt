@@ -61,18 +61,22 @@ import kotlin.math.abs
 import kotlin.math.max
 
 private fun livePreviewMatrix(filter: PageFilter): ColorMatrix {
+    // Live view is intentionally a fast visual approximation. The full-resolution
+    // filter is run after capture and is authoritative for the saved document.
     val sat = when (filter) {
-        PageFilter.BW -> 0f
-        PageFilter.OMNIFIX -> 0.92f
+        PageFilter.BW, PageFilter.GREY -> 0f
+        PageFilter.MAGIC_COLOR -> 1.12f
         else -> 1f
     }
     val (contrast, brightness) = when (filter) {
         PageFilter.ORIGINAL -> 1f to 0f
-        PageFilter.ENHANCE -> 1.22f to 8f
-        PageFilter.LIGHTEN -> 1.05f to 22f
-        PageFilter.NO_SHADOW -> 1.12f to 18f
-        PageFilter.OMNIFIX -> 1.14f to 7f
-        PageFilter.BW -> 1.32f to 4f
+        PageFilter.ENHANCE -> 1.12f to 4f
+        PageFilter.MAGIC_COLOR -> 1.06f to 6f
+        PageFilter.LIGHTEN -> 1.00f to 17f
+        PageFilter.BW -> 1.42f to 8f
+        PageFilter.GREY -> 1.05f to 2f
+        // A color matrix cannot sharpen edges; use a subtle clarity cue in preview.
+        PageFilter.SHARPEN -> 1.05f to 0f
     }
     val matrix = ColorMatrix().apply { setSaturation(sat) }
     val shift = (0.5f - 0.5f * contrast) * 255f + brightness
@@ -238,12 +242,20 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     }
                     val (rg, rw, rh) = EdgeDetect.rotate(g, sw, sh, proxy.imageInfo.rotationDegrees)
                     frameAr = rw.toFloat() / rh
-                    val q = EdgeDetect.detect(rg, rw, rh)
-                    quad = q
+                    val detected = EdgeDetect.detect(rg, rw, rh)
                     val prev = hist[0]
-                    if (q != null && prev != null && (0 until 8).all { abs(q[it] - prev[it]) < 0.025f }) stable[0]++ else stable[0] = 0
-                    hist[0] = q
-                    if (autoNow && q != null && stable[0] >= 6 && EdgeDetect.area(q) > 0.2f && !busyNow && now > cooldown[0]) {
+                    // Reject abrupt jumps in the live overlay; only blend geometrically valid
+                    // detections. The unsmoothed candidate still has to remain stable for capture.
+                    val q = if (detected != null && prev != null &&
+                        (0 until 8).all { abs(detected[it] - prev[it]) < 0.16f }) {
+                        FloatArray(8) { i -> prev[i] * 0.62f + detected[i] * 0.38f }
+                    } else detected
+                    quad = q
+                    if (detected != null && prev != null &&
+                        (0 until 8).all { abs(detected[it] - prev[it]) < 0.025f }) stable[0]++ else stable[0] = 0
+                    hist[0] = detected?.copyOf()
+                    if (autoNow && detected != null && stable[0] >= 6 &&
+                        EdgeDetect.area(detected) > 0.20f && !busyNow && now > cooldown[0]) {
                         stable[0] = 0; autoTrigger = true
                     }
                 } finally { proxy.close() }
