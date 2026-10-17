@@ -115,7 +115,7 @@ internal object CustomDocumentDetector {
             }
 
             val fraction = c.count / total
-            if (fraction < 0.05f || fraction > 0.985f || (ignoreBorder && c.touchesBorder)) continue
+            if (fraction < 0.05f || fraction > 0.985f || c.touchesBorder) continue
             val q = FloatArray(8) { i ->
                 val axis = if (i % 2 == 0) w - 1 else h - 1
                 c.corners[i] / max(1, axis).toFloat()
