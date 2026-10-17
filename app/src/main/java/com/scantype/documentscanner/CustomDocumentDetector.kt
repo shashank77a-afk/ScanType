@@ -35,8 +35,8 @@ internal object CustomDocumentDetector {
         val candidates = ArrayList<Quad>()
 
         val threshold = otsu(smooth)
-        collectComponents(BooleanArray(smooth.size) { smooth[it] >= threshold }, width, height, smooth, gradients, candidates)
-        collectComponents(BooleanArray(smooth.size) { smooth[it] < threshold }, width, height, smooth, gradients, candidates)
+        collectComponents(BooleanArray(smooth.size) { smooth[it] > threshold }, width, height, smooth, gradients, candidates)
+        collectComponents(BooleanArray(smooth.size) { smooth[it] <= threshold }, width, height, smooth, gradients, candidates)
 
         // A small set of gradient thresholds helps preserve faint page boundaries under shadows
         // without letting text texture at one threshold dominate the result.
