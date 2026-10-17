@@ -185,8 +185,8 @@ object ImageFilters {
         return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { it.setPixels(p, 0, w, 0, 0, w, h) }
     }
 
-    private fun grayscale(src: Bitmap, normalizePaper: Boolean): Bitmap {
-        val base = if (normalizePaper) normalizePaper(src, preserveColor = false, strength = 0.40f) else src.copy(Bitmap.Config.ARGB_8888, false)
+    private fun grayscale(src: Bitmap, normalize: Boolean): Bitmap {
+        val base = if (normalize) normalizePaper(src, preserveColor = false, strength = 0.40f) else src.copy(Bitmap.Config.ARGB_8888, false)
         val p = IntArray(base.width * base.height)
         base.getPixels(p, 0, base.width, 0, 0, base.width, base.height)
         for (i in p.indices) {
