@@ -277,7 +277,7 @@ private fun CameraContent(mode: CamMode, onMode: (CamMode) -> Unit, batch: Boole
                     // Only auto-capture a sufficiently supported detection in usable exposure.
                     val exposureUsable = meanBrightness in 38.0..246.0
                     if (autoNow && detected != null && detection != null &&
-                        detection.confidence >= 0.22f && detection.edgeSupport >= 0.10f &&
+                        detection.confidence >= 0.58f && detection.edgeSupport >= 0.58f &&
                         stable[0] >= 5 && EdgeDetect.area(detected) > minimumAutoArea &&
                         exposureUsable && !busyNow && now > cooldown[0]) {
                         stable[0] = 0; autoTrigger = true
