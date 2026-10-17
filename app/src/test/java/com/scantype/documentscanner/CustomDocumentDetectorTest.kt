@@ -58,6 +58,19 @@ class CustomDocumentDetectorTest {
     }
 
     @Test
+    fun rejectsPageClippedByCameraFrame() {
+        val w = 240
+        val h = 320
+        val frame = syntheticFrame(w, h,
+            background = { x, y -> (35 + x / 10 + y / 16).coerceAtMost(95) },
+            page = { x, y -> x in 0..150 && y in 35..285 },
+            paper = { x, y -> (220 + ((x + y) % 7)).coerceAtMost(240) })
+
+        assertNull("A page cut off by the camera frame must not be treated as a complete page",
+            CustomDocumentDetector.detectDetailed(frame, w, h))
+    }
+
+    @Test
     fun returnedCornersAreFiniteAndConvex() {
         val w = 240
         val h = 320
