@@ -142,9 +142,12 @@ object EdgeDetect {
     }
 
     /** Finds the document corners (TL, TR, BR, BL) as 8 values in 0..1, or null when nothing reliable is found. */
-    fun detect(gray: IntArray, w: Int, h: Int): FloatArray? {
+    fun detect(gray: IntArray, w: Int, h: Int): FloatArray? =
+        detectDetailed(gray, w, h)?.corners
+
+    internal fun detectDetailed(gray: IntArray, w: Int, h: Int): CustomDocumentDetector.Detection? {
         if (w < 40 || h < 40 || gray.size < w * h) return null
-        return CustomDocumentDetector.detect(gray, w, h)
+        return CustomDocumentDetector.detectDetailed(gray, w, h)
     }
 
     fun area(q: FloatArray): Float {
