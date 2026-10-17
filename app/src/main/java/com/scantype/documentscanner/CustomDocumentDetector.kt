@@ -12,6 +12,7 @@ import kotlin.math.sqrt
  * blindly selecting the largest connected component.
  */
 internal object CustomDocumentDetector {
+    internal data class Detection(val corners: FloatArray, val confidence: Float, val edgeSupport: Float)
     private data class Quad(val points: FloatArray, val area: Float, val support: Float, val score: Float)
 
     private class Component {
@@ -24,7 +25,10 @@ internal object CustomDocumentDetector {
         val corners = FloatArray(8)
     }
 
-    fun detect(gray: IntArray, width: Int, height: Int): FloatArray? {
+    fun detect(gray: IntArray, width: Int, height: Int): FloatArray? =
+        detectDetailed(gray, width, height)?.corners
+
+    fun detectDetailed(gray: IntArray, width: Int, height: Int): Detection? {
         if (width < 40 || height < 40 || gray.size < width * height) return null
         val smooth = blur3(gray, width, height)
         val gradients = gradientMagnitude(smooth, width, height)
@@ -56,7 +60,7 @@ internal object CustomDocumentDetector {
         // Cluster near-identical candidates and prefer support across all four sides.
         val ranked = candidates.sortedByDescending { it.score }
         val best = ranked.firstOrNull() ?: return null
-        val near = ranked.filter { overlapCorners(it.points, best.points) < 0.08f }
+        val near = ranked.filter { it !== best && overlapCorners(it.points, best.points) < 0.08f }
             .take(3)
         val selected = if (near.isEmpty()) best else {
             // A near duplicate may be marginally more accurate on a different side;
@@ -71,7 +75,7 @@ internal object CustomDocumentDetector {
                 Quad(q, area, support, qualityScore(area, support))
             }
         }
-        return selected.points.copyOf()
+        return Detection(selected.points.copyOf(), selected.score.coerceIn(0f, 1f), selected.support.coerceIn(0f, 1f))
     }
 
     private fun collectComponents(
@@ -111,14 +115,14 @@ internal object CustomDocumentDetector {
             }
 
             val fraction = c.count / total
-            if (fraction < 0.10f || fraction > 0.985f || (ignoreBorder && c.touchesBorder)) continue
+            if (fraction < 0.05f || fraction > 0.985f || (ignoreBorder && c.touchesBorder)) continue
             val q = FloatArray(8) { i ->
                 val axis = if (i % 2 == 0) w - 1 else h - 1
                 c.corners[i] / max(1, axis).toFloat()
             }
             if (!validQuad(q)) continue
             val area = polygonArea(q)
-            if (area < 0.10f || area > 0.985f) continue
+            if (area < 0.06f || area > 0.985f) continue
             // Reject components whose filled region is implausibly different from its four-corner polygon.
             val polygonPixels = max(1f, area * total)
             val fillRatio = c.count / polygonPixels
